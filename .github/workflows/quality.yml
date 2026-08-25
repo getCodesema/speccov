@@ -1,0 +1,63 @@
+name: Quality
+
+on:
+    pull_request:
+    push:
+        branches:
+            - main
+
+permissions:
+    contents: read
+
+jobs:
+    quality:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v5
+
+            - uses: oven-sh/setup-bun@v2
+
+            - run: bun install --frozen-lockfile
+
+            - run: bun run lint
+
+            - run: bun run format:check
+
+            - run: bun run typecheck
+
+            - run: bun test
+
+            # The package ships raw TypeScript; publint is what catches an `exports`
+            # map or a `files` list that would break on a consumer's install.
+            - run: bunx publint
+
+    secrets:
+        runs-on: ubuntu-latest
+        env:
+            # Kept in step with the version the pre-commit and pre-push hooks call
+            # locally, so a secret the hooks would refuse is refused here too.
+            GITLEAKS_VERSION: 8.30.1
+        steps:
+            - uses: actions/checkout@v5
+              with:
+                  # gitleaks reads history, not the working tree: a shallow clone would
+                  # scan one commit and report a clean repository either way.
+                  fetch-depth: 0
+
+            # The official gitleaks-action requires a licence key for repositories
+            # owned by an organisation. The binary itself does not, so install the
+            # pinned release and verify it against the checksums the project publishes
+            # alongside it — a secret scanner fetched over the network is worth
+            # checking before it is trusted.
+            - name: Install gitleaks
+              run: |
+                  base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+                  archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+                  curl --fail --silent --show-error --location --remote-name "${base}/${archive}"
+                  curl --fail --silent --show-error --location --remote-name "${base}/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+                  grep " ${archive}\$" "gitleaks_${GITLEAKS_VERSION}_checksums.txt" | sha256sum --check --strict
+                  tar --extract --gzip --file "${archive}" gitleaks
+                  install -D gitleaks "${RUNNER_TEMP}/bin/gitleaks"
+                  echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
+
+            - run: gitleaks git --no-banner --redact .

@@ -1,0 +1,43 @@
+pre-commit:
+    parallel: true
+    commands:
+        secrets:
+            run: gitleaks protect --staged --redact
+        format:
+            glob: '*'
+            run: bunx prettier --write --ignore-unknown {staged_files}
+            stage_fixed: true
+        lint:
+            glob: '*.{ts,mjs}'
+            run: bunx oxlint {staged_files}
+
+commit-msg:
+    commands:
+        commitlint:
+            run: bunx commitlint --edit {1}
+
+pre-push:
+    parallel: true
+    commands:
+        secrets:
+            # pre-commit only ever sees the index: a secret introduced by a commit that skipped
+            # the hook (--no-verify, a rebase, a cherry-pick, a commit written by another tool)
+            # would meet nothing before the forge. So scan what is about to leave, bounded to the
+            # unpushed commits — earlier history was scanned by earlier pushes, and a full scan
+            # grows with the repository. Fall back to the full scan while the branch has no
+            # upstream yet (first push, `@{push}` unresolved).
+            run: |
+                if remote_head="$(git rev-parse '@{push}' 2>/dev/null)"; then
+                  gitleaks git --no-banner --redact --log-opts="$remote_head..HEAD" .
+                else
+                  gitleaks git --no-banner --redact .
+                fi
+        typecheck:
+            run: bun run typecheck
+        test:
+            # git exports its repo-location variables (GIT_DIR, GIT_WORK_TREE, ...) to the hooks
+            # it runs, and this suite spawns `git check-ignore` inside throwaway tmpdirs. Those
+            # inherited variables would silently redirect every one of those calls back to the
+            # real repository, and the ignore tests would then answer about this repo instead of
+            # their fixture. Strip them before running the tests.
+            run: env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY -u GIT_COMMON_DIR -u GIT_PREFIX -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_QUARANTINE_PATH bun test
