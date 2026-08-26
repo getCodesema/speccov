@@ -1,7 +1,13 @@
 import ts from 'typescript';
 
 export type ShapeKind =
-    'unbounded-fanout' | 'bounded-fanout' | 'in-flight-drain' | 'async-per-item' | 'awaited-in-loop' | 'paginated-return';
+    | 'unbounded-fanout'
+    | 'bounded-fanout'
+    | 'in-flight-drain'
+    | 'async-per-item'
+    | 'awaited-in-loop'
+    | 'paginated-return'
+    | 'unbounded-primitive';
 
 export type Site = {
     readonly kind: ShapeKind;
@@ -31,9 +37,10 @@ export function findShapes(parsed: ts.SourceFile, checker: ts.TypeChecker, file:
     const anchoredBy = new Map<ts.Node, ts.Node>();
     const seen = new Set<string>();
 
-    const record = (kind: ShapeKind, node: ts.Node): void => {
+    /** `discriminator` separates two answers carried by the same line, such as two parameters. */
+    const record = (kind: ShapeKind, node: ts.Node, discriminator = ''): void => {
         const { line } = parsed.getLineAndCharacterOfPosition(node.getStart(parsed));
-        const key = `${kind}:${line}`;
+        const key = `${kind}:${line}:${discriminator}`;
         if (seen.has(key)) {
             return;
         }
@@ -61,11 +68,57 @@ export function findShapes(parsed: ts.SourceFile, checker: ts.TypeChecker, file:
         if (ts.isObjectLiteralExpression(node) && hasBoth(node, 'items', 'total')) {
             record('paginated-return', node);
         }
+        if (isExported(node)) {
+            for (const parameter of node.parameters) {
+                if (isBarePrimitive(parameter, checker)) {
+                    record('unbounded-primitive', parameter, parameter.name.getText(parsed));
+                }
+            }
+        }
         ts.forEachChild(node, visit);
     };
 
     visit(parsed);
     return sites;
+}
+
+/**
+ * An exported function is a frontier: its arguments can come from anywhere, including code the
+ * compiler never saw, such as a parsed body or a row read from a database. Inside the module
+ * the caller is typed, so the guarantee holds and there is nothing left to ask.
+ */
+function isExported(node: ts.Node): node is ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction {
+    if (ts.isFunctionDeclaration(node)) {
+        return isExportedNode(node);
+    }
+    if (!ts.isArrowFunction(node) && !ts.isFunctionExpression(node)) {
+        return false;
+    }
+    const declaration = node.parent;
+    if (!ts.isVariableDeclaration(declaration)) {
+        return false;
+    }
+    const statement = declaration.parent.parent;
+    return ts.isVariableStatement(statement) && isExportedNode(statement);
+}
+
+function isExportedNode(node: ts.Node): boolean {
+    return ts.canHaveModifiers(node) && (ts.getModifiers(node) ?? []).some(({ kind }) => kind === ts.SyntaxKind.ExportKeyword);
+}
+
+/**
+ * A `string` or a `number`, written bare, hence an infinite domain the type does not narrow.
+ *
+ * A literal union is left out: the compiler already closed it, and there is no question to
+ * ask. Unions and optionals widen the question without changing it, and are left to a later
+ * pass: here a question that turns out to be wrong costs a commit, not a second of attention.
+ */
+function isBarePrimitive(parameter: ts.ParameterDeclaration, checker: ts.TypeChecker): boolean {
+    if (parameter.type === undefined) {
+        return false;
+    }
+    const type = checker.getTypeAtLocation(parameter);
+    return (type.flags & (ts.TypeFlags.String | ts.TypeFlags.Number)) !== 0;
 }
 
 /** How far the walk back to a collection's source is allowed to go. */

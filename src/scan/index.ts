@@ -52,7 +52,10 @@ export async function scan({ root, tsconfig }: ScanOptions): Promise<ScanResult>
             if (site.file.startsWith('..')) {
                 continue;
             }
-            const key = `${site.kind}\u0000${site.file}\u0000${site.line}`;
+            // The excerpt is part of the key: a signature carries one question per parameter, all
+            // on the same line. The same site seen through two scopes yields the same excerpt, so
+            // the duplicate is still dropped.
+            const key = `${site.kind}\u0000${site.file}\u0000${site.line}\u0000${site.excerpt}`;
             if (!seen.has(key)) {
                 seen.add(key);
                 sites.push(site);

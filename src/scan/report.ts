@@ -44,6 +44,11 @@ const CANDIDATES: readonly { kind: ShapeKind; rule: string; question: string }[]
         rule: 'metamorphic()',
         question: 'should `total` stay the same whatever the page?',
     },
+    {
+        kind: 'unbounded-primitive',
+        rule: 'forbidden()',
+        question: 'this parameter takes the whole primitive domain (empty string, NaN, negative, unbounded): what is the limit?',
+    },
 ];
 
 const MAX_SITES_SHOWN = 6;
