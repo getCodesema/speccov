@@ -513,3 +513,65 @@ describe('one place, not two', () => {
         expect(kinds('users.map((u) => repo.update(u));')).toEqual(['async-per-item']);
     });
 });
+
+/**
+ * A drain waits for work that another line started. It holds as many promises as a fan-out
+ * and reads the same by width, so every fixture here pairs the drain with the fan-out it must
+ * not be confused with.
+ */
+describe('waiting is not launching', () => {
+    test('a set of promises is drained, not fanned out', () => {
+        const found = kinds('const poses = new Set<Promise<void>>();\nawait Promise.allSettled(poses);');
+        expect(found).toContain('in-flight-drain');
+        expect(found).not.toContain('unbounded-fanout');
+    });
+
+    test('the values of a map of promises are drained', () => {
+        const found = kinds('const inflight = new Map<string, Promise<void>>();\nawait Promise.all([...inflight.values()]);');
+        expect(found).toContain('in-flight-drain');
+        expect(found).not.toContain('unbounded-fanout');
+    });
+
+    test('two spreads of promises stay a drain', () => {
+        const source =
+            'const inflight = new Map<string, Promise<void>>();\n' +
+            'const abandons = new Set<Promise<void>>();\n' +
+            'await Promise.allSettled([...inflight.values(), ...abandons]);';
+        expect(kinds(source)).toContain('in-flight-drain');
+    });
+
+    test('decorating promises in flight does not launch them', () => {
+        const source =
+            'const proxies = new Map<string, Promise<void>>();\n' +
+            'const settled = [...proxies.values()].map((p) => p.catch(() => null));\n' +
+            'await Promise.all(settled);';
+        const found = kinds(source);
+        expect(found).toContain('in-flight-drain');
+        expect(found).not.toContain('unbounded-fanout');
+        // The `.map()` decorates, so it is not one outgoing call per item either.
+        expect(found).not.toContain('async-per-item');
+    });
+
+    test('a name holding a real fan-out stays a fan-out', () => {
+        const found = kinds('const tasks = users.map((u) => sync(u));\nawait Promise.all(tasks);');
+        expect(found).toContain('unbounded-fanout');
+        expect(found).not.toContain('in-flight-drain');
+    });
+
+    test('an array literal of calls launches them here', () => {
+        const found = kinds('await Promise.all([a(), b(), c()]);');
+        expect(found).toContain('bounded-fanout');
+        expect(found).not.toContain('in-flight-drain');
+    });
+
+    test('a decoration on a launch keeps the launch', () => {
+        expect(kinds('users.map((u) => sync(u).finally(() => undefined));')).toContain('async-per-item');
+    });
+
+    test('a let is not followed to its initialiser', () => {
+        const found = kinds(
+            'const inflight = new Map<string, Promise<void>>();\nlet settled = [...inflight.values()];\nawait Promise.all(settled);',
+        );
+        expect(found).not.toContain('in-flight-drain');
+    });
+});

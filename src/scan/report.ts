@@ -102,13 +102,20 @@ export function reportScan(result: ScanResult): string {
     }
 
     const bounded = result.sites.filter(({ kind }) => kind === 'bounded-fanout');
+    const drains = result.sites.filter(({ kind }) => kind === 'in-flight-drain');
     lines.push('  ── Proven by construction ─────────────────────────────────');
     lines.push(...everywhere);
     if (bounded.length > 0) {
         const plural = bounded.length > 1 ? 's' : '';
         lines.push(`     ✓ ${bounded.length} fan-out${plural} bounded in writing (array literal or file-local constant)`);
     }
-    if (everywhere.length === 0 && bounded.length === 0) {
+    // Counted and said out loud, like everything this pass sets aside. A silenced drain would
+    // read as a site never looked at.
+    if (drains.length > 0) {
+        const plural = drains.length > 1 ? 's' : '';
+        lines.push(`     ✓ ${drains.length} wait${plural} on promises already in flight (started elsewhere, opens nothing)`);
+    }
+    if (everywhere.length === 0 && bounded.length === 0 && drains.length === 0) {
         lines.push('     nothing to declare');
     }
 

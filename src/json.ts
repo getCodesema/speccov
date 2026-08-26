@@ -28,6 +28,7 @@ export function scanToJson(result: ScanResult): string {
         provenByConstruction: {
             flags: coverage.filter(({ offIn }) => offIn.length === 0).map(({ flag, proves }) => ({ flag, proves })),
             boundedFanOut: result.sites.filter(({ kind }) => kind === 'bounded-fanout').length,
+            awaitedInFlight: result.sites.filter(({ kind }) => kind === 'in-flight-drain').length,
         },
         guaranteedByNobody: {
             flags: coverage.filter(({ offIn }) => offIn.length > 0).map(({ flag, proves, offIn }) => ({ flag, proves, offIn })),
