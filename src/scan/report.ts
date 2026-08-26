@@ -13,7 +13,7 @@ export type ScanResult = {
     readonly guarantees: readonly Scope[];
     readonly sites: readonly Site[];
     readonly filesScanned: number;
-    /** Files the pass could not read. Counted, never silenced. */
+    /** Paths the walk could not open, a directory the mode refuses among them. Counted, never silenced. */
     readonly unreadable: readonly string[];
     /** Code files left unparsed, by extension. Declared, never silenced. */
     readonly skipped: ReadonlyMap<string, number>;
@@ -203,7 +203,7 @@ export function reportScan(result: ScanResult, accepted: readonly Site[] = []): 
         lines.push(`     ${result.testsExcluded} test file(s) deliberately excluded.`);
     }
     if (result.unreadable.length > 0) {
-        lines.push(`     ${result.unreadable.length} unreadable file(s): ${result.unreadable.slice(0, 3).join(', ')}`);
+        lines.push(`     ${result.unreadable.length} unreadable path(s): ${result.unreadable.slice(0, 3).join(', ')}`);
     }
     lines.push('');
     return lines.join('\n');

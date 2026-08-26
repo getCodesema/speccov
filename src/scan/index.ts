@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, type Dirent } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import { dirname, join, relative, resolve } from 'node:path';
 import { readGuarantees } from './guarantees';
@@ -63,13 +63,13 @@ export async function scan({ root, tsconfig }: ScanOptions): Promise<ScanResult>
         }
     }
 
-    const unreadable: string[] = [];
     const skipped = new Map<string, number>();
     let filesScanned = 0;
     let testsExcluded = 0;
 
     // The walk now only serves honest accounting: what was not looked at.
-    for (const path of await walkTracked(root)) {
+    const { paths, unreadable } = await walkTracked(root);
+    for (const path of paths) {
         const unparsed = UNPARSED.exec(path)?.[1];
         if (unparsed !== undefined) {
             skipped.set(unparsed, (skipped.get(unparsed) ?? 0) + 1);
@@ -84,18 +84,27 @@ export async function scan({ root, tsconfig }: ScanOptions): Promise<ScanResult>
     return { guarantees, sites, filesScanned, unreadable, skipped, testsExcluded, refused };
 }
 
-/** Everything the walk finds, minus what the repository sets aside. */
-async function walkTracked(root: string): Promise<readonly string[]> {
+/** Everything the walk finds, minus what the repository sets aside, plus what it could not open. */
+async function walkTracked(root: string): Promise<{ readonly paths: readonly string[]; readonly unreadable: readonly string[] }> {
     const found: string[] = [];
-    for await (const path of walk(root)) {
+    const unreadable: string[] = [];
+    for await (const path of walk(root, unreadable)) {
         found.push(path);
     }
-    return dropIgnored(root, found);
+    return {
+        paths: await dropIgnored(root, found),
+        unreadable: unreadable.map((path) => relative(root, path) || path),
+    };
 }
 
 /** A monorepo has one tsconfig per app: construction guarantees are evaluated scope by scope. */
 async function* walkConfigs(directory: string): AsyncGenerator<string> {
-    const entries = await readdir(directory, { withFileTypes: true });
+    // Unreadable here means one thing only: no scope was found under it. The accounting walk
+    // covers the same tree and is the one that reports the path, so it is not named twice.
+    const entries = await readEntries(directory);
+    if (entries === undefined) {
+        return;
+    }
     for (const entry of entries) {
         const path = join(directory, entry.name);
         if (entry.isDirectory() && !IGNORED.has(entry.name)) {
@@ -149,17 +158,36 @@ export async function collectSources(root: string): Promise<readonly string[]> {
     if ((await stat(root)).isFile()) {
         return SOURCE.test(root) && !GENERATED.test(root) ? [root] : [];
     }
-    const found = await walkTracked(root);
-    return found.filter((path) => !UNPARSED.test(path) && !TEST.test(path));
+    const { paths } = await walkTracked(root);
+    return paths.filter((path) => !UNPARSED.test(path) && !TEST.test(path));
 }
 
-async function* walk(directory: string): AsyncGenerator<string> {
-    const entries = await readdir(directory, { withFileTypes: true });
+/**
+ * The entries of a directory, or nothing when it does not open.
+ *
+ * A directory the process cannot open used to abort the whole scan: one folder with the wrong
+ * mode, and a repository came back with no answer at all. Both walks step over it instead,
+ * because a scan that stops has nothing to say about the rest of the tree.
+ */
+async function readEntries(directory: string): Promise<readonly Dirent[] | undefined> {
+    try {
+        return await readdir(directory, { withFileTypes: true });
+    } catch {
+        return undefined;
+    }
+}
+
+async function* walk(directory: string, unreadable: string[]): AsyncGenerator<string> {
+    const entries = await readEntries(directory);
+    if (entries === undefined) {
+        unreadable.push(directory);
+        return;
+    }
     for (const entry of entries) {
         const path = join(directory, entry.name);
         if (entry.isDirectory()) {
             if (!IGNORED.has(entry.name)) {
-                yield* walk(path);
+                yield* walk(path, unreadable);
             }
         } else if ((SOURCE.test(entry.name) || UNPARSED.test(entry.name)) && !GENERATED.test(entry.name)) {
             yield path;
