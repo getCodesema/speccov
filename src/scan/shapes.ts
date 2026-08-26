@@ -1,6 +1,7 @@
 import ts from 'typescript';
 
-export type ShapeKind = 'unbounded-fanout' | 'bounded-fanout' | 'in-flight-drain' | 'async-per-item' | 'paginated-return';
+export type ShapeKind =
+    'unbounded-fanout' | 'bounded-fanout' | 'in-flight-drain' | 'async-per-item' | 'awaited-in-loop' | 'paginated-return';
 
 export type Site = {
     readonly kind: ShapeKind;
@@ -54,6 +55,9 @@ export function findShapes(parsed: ts.SourceFile, checker: ts.TypeChecker, file:
         if (ts.isCallExpression(node) && isMapCall(node) && callsAsyncPerItem(node, checker) && !isBoundedWidth(node, scope)) {
             record('async-per-item', anchoredBy.get(node) ?? node);
         }
+        if (isSerialAwait(node, scope, checker)) {
+            record('awaited-in-loop', node);
+        }
         if (ts.isObjectLiteralExpression(node) && hasBoth(node, 'items', 'total')) {
             record('paginated-return', node);
         }
@@ -66,6 +70,87 @@ export function findShapes(parsed: ts.SourceFile, checker: ts.TypeChecker, file:
 
 /** How far the walk back to a collection's source is allowed to go. */
 const MAX_WALK = 8;
+
+/**
+ * `for (const x of xs) { await go(x) }` — one call per item, waited for one after the other.
+ *
+ * Everything above this reads concurrency: how many calls leave at once, and under what
+ * ceiling. This reads the opposite shape, and it was the blind spot. A serial `await` has a
+ * concurrency of one, so it never triggered a single question, while its total cost grows with
+ * the collection just as surely as a fan-out's — in time rather than in sockets. Measured on
+ * codesema and codesema-tools: 78 loops of this shape against 17 concurrency sites, so the
+ * pass was silent on the more common of the two.
+ *
+ * `task-isolation.ts:1036` in codesema-tools is the one that made the case: a `for…of` awaiting
+ * a container removal at 30s of timeout apiece, two lines under a `Promise.all` the pass was
+ * asking about wrongly.
+ *
+ * Three filters keep it from becoming noise, since a serial loop is often exactly what someone
+ * wanted:
+ *
+ * - the collection must be unbounded, which is the same reading as everywhere else. `for
+ *   (const t of TABLES)` over a written list asks nothing;
+ * - the call must leave the process — the return type decides, as it does for `.map()`;
+ * - `Promise.all` and friends are left out: they carry their own question, at their own address.
+ */
+function isSerialAwait(node: ts.Node, scope: Scope, checker: ts.TypeChecker): boolean {
+    if (!ts.isForOfStatement(node) && !ts.isForInStatement(node)) {
+        return false;
+    }
+    if (isBoundedWidth(node.expression, scope)) {
+        return false;
+    }
+    return awaitsPerTurn(node.statement, checker);
+}
+
+/**
+ * Is a call awaited on every turn of this body?
+ *
+ * Nested loops are walked into: awaiting once per turn of an inner loop is the same cost, only
+ * worse. Functions are not: a callback declared here runs on its own schedule, which is the
+ * same boundary `callsAsyncPerItem` draws.
+ */
+function awaitsPerTurn(body: ts.Node, checker: ts.TypeChecker): boolean {
+    let found = false;
+    const visit = (node: ts.Node): void => {
+        if (found || ts.isFunctionLike(node)) {
+            return;
+        }
+        const launched = ts.isAwaitExpression(node) ? launchedBy(node.expression, checker) : undefined;
+        if (launched !== undefined && !isPromiseCombinator(launched) && returnsPromise(launched, checker)) {
+            found = true;
+            return;
+        }
+        ts.forEachChild(node, visit);
+    };
+    visit(body);
+    return found;
+}
+
+/**
+ * The call an awaited expression actually launches, past its handlers.
+ *
+ * `await exec(runtime, […]).catch(() => null)` waits on `exec`, and the `.catch` only says what
+ * to do if it fails. Reading the outermost call would have let through `task-isolation.ts:1036`
+ * — a container removal per item, at 30s of timeout apiece, and the very site this rule was
+ * written for. `await p.catch(…)` on a name gives nothing back: there, nothing is launched.
+ */
+function launchedBy(expression: ts.Expression, checker: ts.TypeChecker): ts.CallExpression | undefined {
+    if (!ts.isCallExpression(expression)) {
+        return undefined;
+    }
+    if (!isDecoration(expression, checker)) {
+        return expression;
+    }
+    return ts.isPropertyAccessExpression(expression.expression)
+        ? launchedBy(expression.expression.expression, checker)
+        : undefined;
+}
+
+/** `Promise.all` and its siblings already have a question, and an address of their own. */
+function isPromiseCombinator(call: ts.CallExpression): boolean {
+    return isPromiseAll(call) || isPromiseRace(call) || isPromiseMethod(call, 'any');
+}
 
 /**
  * Which of the three fan-out verdicts this argument deserves.

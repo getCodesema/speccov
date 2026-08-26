@@ -35,6 +35,11 @@ const CANDIDATES: readonly { kind: ShapeKind; rule: string; question: string }[]
         question: 'one asynchronous call per item — should their number grow?',
     },
     {
+        kind: 'awaited-in-loop',
+        rule: 'complexity()',
+        question: 'one awaited call per item, in series — should the wait grow with the collection?',
+    },
+    {
         kind: 'paginated-return',
         rule: 'metamorphic()',
         question: 'should `total` stay the same whatever the page?',

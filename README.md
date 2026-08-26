@@ -183,8 +183,30 @@ by omission. That is the reproach made to a 90% coverage.
 | `const batch = xs.slice(i, i + n)` then `batch.map(…)` | **none** — the batch is bounded by its width              |
 | `X.map((i) => <button onClick={() => go(i)} />)`       | **none** — the call goes out on click, not per item       |
 | `(await listDir(root)).map((e) => e.path)`             | **none** — the promise is on the receiver: a batched read |
+| `for (const x of xs) { await go(x) }`                  | `complexity()` — should the wait grow with the list?      |
 | `Promise.all([...inflight.values()])`                  | **none** — a drain: that work was started elsewhere       |
 | `import { KEYS }` then `KEYS.map(…)`                   | **none** — the width is written, one file over            |
+
+### The shape it used to be blind to
+
+Every question above reads **concurrency**: how many calls leave at once, under what ceiling. A
+serial `await` has a concurrency of one, so it triggered nothing at all:
+
+```ts
+for (const container of containers) {
+    await exec(runtime, ['rm', '-f', container], { timeoutMs: 30_000 }).catch(() => null);
+}
+```
+
+The cost grows with the collection just as surely as a fan-out's, in time instead of sockets.
+Measured on codesema and codesema-tools: **78 loops of this shape against 17 concurrency
+sites** — the pass was silent on the more common of the two. That very loop sits two lines
+under a `Promise.all` it was asking about wrongly.
+
+Three filters keep it from being noise, because a serial loop is very often deliberate: the
+collection must be unbounded, the awaited call must leave the process, and `Promise.all` is
+left out since it carries its own question at its own address. Against 78 raw loops, 28 sites
+are reported.
 
 ### It waits on the types it builds
 

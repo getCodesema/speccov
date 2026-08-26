@@ -611,3 +611,49 @@ describe('a constant declared next door', () => {
         ).toContain('unbounded-fanout');
     });
 });
+
+/**
+ * The shape the pass never looked at: concurrency of one, cost that grows all the same. The
+ * fixtures pair each site with the loop right next to it that must stay silent, because a
+ * serial loop is very often exactly what someone meant.
+ */
+describe('awaiting in series', () => {
+    test('one awaited call per item is a site', () => {
+        expect(kinds('for (const x of xs) {\n  await sync(x);\n}')).toContain('awaited-in-loop');
+    });
+
+    test('a written collection asks nothing', () => {
+        const found = kinds('const TABLES = ["a", "b"];\nfor (const t of TABLES) {\n  await sync(t);\n}');
+        expect(found).not.toContain('awaited-in-loop');
+    });
+
+    test('a loop that waits for nothing asks nothing', () => {
+        expect(kinds('for (const x of xs) {\n  helpers.countRows(x);\n}')).not.toContain('awaited-in-loop');
+    });
+
+    test('a handler on the call does not hide the call', () => {
+        expect(kinds('for (const x of xs) {\n  await sync(x).catch(() => null);\n}')).toContain('awaited-in-loop');
+    });
+
+    test('awaiting a name launches nothing', () => {
+        const source =
+            'const inflight = new Map<string, Promise<void>>();\nfor (const p of inflight.values()) {\n  await p.catch(() => null);\n}';
+        expect(kinds(source)).not.toContain('awaited-in-loop');
+    });
+
+    test('a Promise.all in a loop keeps its own question, at its own address', () => {
+        const found = kinds('for (const x of xs) {\n  await Promise.all(ids.map((i) => go(i)));\n}');
+        expect(found).toContain('unbounded-fanout');
+        expect(found).not.toContain('awaited-in-loop');
+    });
+
+    test('an await inside a nested loop counts: it is the same cost, worse', () => {
+        expect(kinds('for (const x of xs) {\n  for (const i of ids) {\n    await go(i);\n  }\n}')).toContain('awaited-in-loop');
+    });
+
+    test('an await inside a callback runs on its own schedule', () => {
+        expect(kinds('for (const x of xs) {\n  void (async () => {\n    await sync(x);\n  })();\n}')).not.toContain(
+            'awaited-in-loop',
+        );
+    });
+});
