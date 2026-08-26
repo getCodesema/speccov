@@ -183,9 +183,34 @@ by omission. That is the reproach made to a 90% coverage.
 | `const batch = xs.slice(i, i + n)` then `batch.map(…)` | **none** — the batch is bounded by its width              |
 | `X.map((i) => <button onClick={() => go(i)} />)`       | **none** — the call goes out on click, not per item       |
 | `(await listDir(root)).map((e) => e.path)`             | **none** — the promise is on the receiver: a batched read |
+| `Promise.all([...inflight.values()])`                  | **none** — a drain: that work was started elsewhere       |
+| `import { KEYS }` then `KEYS.map(…)`                   | **none** — the width is written, one file over            |
 
-It parses with no type checker (`createSourceFile`, not `createProgram`): no module
-resolution, no `node_modules` to walk. That is what makes it usable in pre-commit.
+### It waits on the types it builds
+
+`scan` builds a real `ts.Program` per scope, with module resolution: what a site means is read
+from the types, not guessed from the shape. Two questions cannot be answered any other way.
+
+**Is this promise being launched, or merely awaited?** `Promise.all(users.map((u) => sync(u)))`
+opens one outgoing call per item. `Promise.all([...inflight.values()])` opens nothing at all:
+the work is already running, and a ceiling here would bound nothing. Both hold N promises and
+read the same by width, so speccov walks back to where the collection came from. Three shutdown
+drains in codesema-tools used to be reported as fan-outs, and a ceiling on any of them would
+have been a fix for a defect that was not there.
+
+**How wide is a collection declared next door?** A name imported from another file is followed
+to its declaration, and to the literal that gives it a width. The declaring file is read too:
+`export const rows = []` filled by a `rows.push(…)` over there is an accumulator, and importing
+it must not launder it.
+
+What stays outside is what the program cannot show. A **parameter** keeps its question: the
+width belongs to the callers, and an exported function has callers this scope may not even
+contain. `runProbes(probes)` in codesema-tools is called twice, both times with a written list,
+and it is still asked about — because nothing stops the third caller from passing a thousand.
+
+The cost of that program is paid once per scope, and only for scopes that have something to
+read: a generated scope declaring nothing but `.d.ts` files is skipped before the program is
+built. Six of them were eating 15s of a 35s scan on codesema to type four files between them.
 
 Test files are excluded: a fixture is not a production defect. But the exclusion is
 **counted and displayed** — like everything the pass does not read (`.vue`, `.js`, `.mjs`).
@@ -199,7 +224,12 @@ And it never concludes beyond what it read: on that monorepo, 15 of the 19 `tsco
 have an unresolvable `extends`, so the report announces
 `(reach: 4 of 19 scope(s) — see “Not measured”)` instead of saying "off everywhere".
 
-Measured on a 1,566-file monorepo: **0.78s**, everything included.
+Measured on codesema, 346 files typed across five scopes with their `node_modules` resolved:
+**27s**, everything included, of which about 25 goes into building the programs. An earlier
+figure of 0.78s on 1,566 files was measured where 15 of 19 `tsconfig.json` had an unresolvable
+`extends`, so almost no program was ever built: it timed the refusal, not the work. Being
+slower on a well-configured repository than on a broken one is the wrong way round, and it is
+still true — a pre-commit hook is not the right home for this pass today.
 
 ### It does not conclude when it does not know
 
@@ -253,6 +283,41 @@ Accepting is therefore not going quiet: it is **setting a threshold the build wi
   be exactly the blind spot the tool claims to fight.
 - **An unreadable answers file throws.** Reading it as empty would make everything noisy;
   reading it as "all accepted" would make it blind. Both are worse than a halt.
+
+### Answering a site works the same way
+
+`scan` is the cheapest entry point, so it is the one that ends up in CI and in an agent loop —
+and it had nowhere to write an answer down. A site a human had ruled out came back identical at
+the next pass, carrying the same weight as a real N+1.
+
+```sh
+speccov scan . --accept 'packages/cli/src/probes.ts:73' --why "called with a written list only"
+```
+
+```json
+{
+    "version": 1,
+    "sites": [
+        {
+            "file": "packages/cli/src/probes.ts",
+            "kind": "unbounded-fanout",
+            "shape": "Promise.all(running)",
+            "at": "2026-08-26",
+            "why": "called with a written list only"
+        }
+    ]
+}
+```
+
+What is remembered is **the shape of the code, never the line**. A site moves down a file every
+time something is inserted above it, and an answer keyed on a line number would expire on the
+next commit, which is a way of remembering nothing. Reformatting is absorbed too, trailing
+comma included.
+
+The answer expires when that code changes, because it is then no longer the question anyone
+answered — the same refusal as a threshold overrun above. And an answered site is **counted in
+the report**, for the same reason an accepted gap is: a forgotten acceptance is the blind spot
+this tool exists to refuse.
 
 ## On a real TypeORM
 
