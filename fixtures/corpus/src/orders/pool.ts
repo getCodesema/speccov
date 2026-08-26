@@ -37,22 +37,18 @@ export async function settleQuietly(): Promise<readonly (Order | undefined)[]> {
     return await Promise.all([...inflight.values()].map(async (pending) => await pending.catch(() => undefined)));
 }
 
-/**
- * A limit, written here so that lifting it is a decision.
- *
- * Only `all` and `allSettled` are classified today. `race` and `any` open exactly as many
- * outgoing calls as `all` does, since waiting on the first to answer starts every one of them:
- * the fan-out below is real and no question is asked about its ceiling.
- */
+/** A drain is a drain whatever gathers it: `race` waits on promises it did not start. */
 export async function first(): Promise<Order> {
-    // @expect none
+    // @expect in-flight-drain
     return await Promise.race([...inflight.values()]);
 }
 
+/**
+ * And a fan-out is a fan-out whatever waits on it. Awaiting the first answer starts every
+ * call all the same, so both questions are open here, exactly as under `Promise.all`.
+ */
 export async function firstOf(ids: readonly string[]): Promise<Order> {
-    // Only the growth question comes out. The concurrency one, which `all` would have raised
-    // on this very line, does not.
-    // @expect async-per-item
+    // @expect unbounded-fanout, async-per-item
     return await Promise.race(ids.map(async (id) => await loadOrder(id)));
 }
 
@@ -62,6 +58,12 @@ const BATCH = 25;
 export async function firstBatch(ids: readonly string[]): Promise<readonly Order[]> {
     // @expect bounded-fanout
     return await Promise.all(ids.slice(0, BATCH).map(async (id) => await loadOrder(id)));
+}
+
+/** `any` is read the same way, and a width the code writes closes the ceiling question. */
+export async function anyOf(ids: readonly string[]): Promise<Order> {
+    // @expect bounded-fanout
+    return await Promise.any(ids.slice(0, BATCH).map(async (id) => await loadOrder(id)));
 }
 
 /** Awaiting one promise already in flight is neither a fan-out nor a drain. */

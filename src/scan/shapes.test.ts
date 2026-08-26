@@ -674,6 +674,45 @@ function primitivesOf(source: string): readonly Site[] {
     return moduleSitesOf(source).filter(({ kind }) => kind === 'unbounded-primitive');
 }
 
+describe('the four combinators', () => {
+    /**
+     * `race` and `any` were read by nothing: only `all` and `allSettled` were classified, so a
+     * fan-out awaited by the first answer kept its growth question and lost its ceiling one.
+     * They open the same calls, so they now carry the same three verdicts.
+     */
+    test('a fan-out awaited by `race` is a fan-out', () => {
+        const found = sitesOf('await Promise.race(users.map((u) => sync(u)));').map(({ kind }) => kind);
+        expect(found).toContain('unbounded-fanout');
+    });
+
+    test('a fan-out awaited by `any` is a fan-out', () => {
+        const found = sitesOf('await Promise.any(users.map((u) => sync(u)));').map(({ kind }) => kind);
+        expect(found).toContain('unbounded-fanout');
+    });
+
+    test('`race` over promises already in flight is a drain, not a fan-out', () => {
+        const source = 'const inflight = new Map<string, Promise<void>>();\nawait Promise.race([...inflight.values()]);';
+        const found = kinds(source);
+        expect(found).toContain('in-flight-drain');
+        expect(found).not.toContain('unbounded-fanout');
+    });
+
+    test('a width the code writes closes the question under `race` as under `all`', () => {
+        const found = sitesOf('await Promise.race(users.slice(0, 5).map((u) => sync(u)));').map(({ kind }) => kind);
+        expect(found).toContain('bounded-fanout');
+        expect(found).not.toContain('unbounded-fanout');
+    });
+
+    test('the four verdicts land at one address, that of the combinator', () => {
+        const all = sitesOf('await Promise.all(users.map((u) => sync(u)));');
+        const race = sitesOf('await Promise.race(users.map((u) => sync(u)));');
+        // Same shape, same two questions, same single line: `race` is not read a line apart.
+        expect(race.map(({ kind, line }) => `${kind}:${line}`).sort()).toEqual(
+            all.map(({ kind, line }) => `${kind}:${line}`).sort(),
+        );
+    });
+});
+
 describe('unbounded primitive', () => {
     test('an exported parameter typed `number` has no bound the type states', () => {
         const found = moduleSitesOf('export function tarif(prix: number): void {}').map(({ kind }) => kind);

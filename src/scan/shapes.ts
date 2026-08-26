@@ -49,7 +49,7 @@ export function findShapes(parsed: ts.SourceFile, checker: ts.TypeChecker, file:
     };
 
     const visit = (node: ts.Node): void => {
-        if (ts.isCallExpression(node) && isPromiseAll(node)) {
+        if (ts.isCallExpression(node) && isPromiseCombinator(node)) {
             const [argument] = node.arguments;
             if (argument !== undefined) {
                 // The drain is asked first: it answers a different question from the width.
@@ -200,7 +200,14 @@ function launchedBy(expression: ts.Expression, checker: ts.TypeChecker): ts.Call
         : undefined;
 }
 
-/** `Promise.all` and its siblings already have a question, and an address of their own. */
+/**
+ * `Promise.all` and its siblings already have a question, and an address of their own.
+ *
+ * The four are read alike, because they open the same calls. `race` and `any` differ only in
+ * what is waited for: awaiting the first answer starts every one of them, so the outgoing
+ * concurrency is that of `all` and the ceiling question is the same. Reading `all` alone left
+ * `Promise.race(ids.map(load))` with its growth question and without its concurrency one.
+ */
 function isPromiseCombinator(call: ts.CallExpression): boolean {
     return isPromiseAll(call) || isPromiseRace(call) || isPromiseMethod(call, 'any');
 }

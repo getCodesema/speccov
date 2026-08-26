@@ -29,8 +29,8 @@ test('the corpus keeps covering both sides: shapes claimed, and lines claimed em
 
     // A corpus that lost its negatives still passes while proving much less. Counted, so that
     // deleting one is a decision rather than an accident.
-    expect(verdict.matched).toBeGreaterThanOrEqual(23);
-    expect(verdict.negatives).toBeGreaterThanOrEqual(12);
+    expect(verdict.matched).toBeGreaterThanOrEqual(26);
+    expect(verdict.negatives).toBeGreaterThanOrEqual(11);
 });
 
 /**
