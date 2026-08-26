@@ -107,7 +107,9 @@ export function reportScan(result: ScanResult): string {
     lines.push(...everywhere);
     if (bounded.length > 0) {
         const plural = bounded.length > 1 ? 's' : '';
-        lines.push(`     ✓ ${bounded.length} fan-out${plural} bounded in writing (array literal or file-local constant)`);
+        lines.push(
+            `     ✓ ${bounded.length} fan-out${plural} bounded in writing (array literal or a constant written somewhere)`,
+        );
     }
     // Counted and said out loud, like everything this pass sets aside. A silenced drain would
     // read as a site never looked at.

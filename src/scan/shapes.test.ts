@@ -575,3 +575,39 @@ describe('waiting is not launching', () => {
         expect(found).not.toContain('in-flight-drain');
     });
 });
+
+describe('a constant declared next door', () => {
+    function crossFileKinds(source: string): readonly ShapeKind[] {
+        const files = {
+            '/keys.ts':
+                'export const KEYS = ["a", "b", "c"] as const;\n' +
+                // An accumulator over there is an accumulator here: filled in its own file,
+                // under its own name, and the import must not launder it.
+                'export const rows: string[] = [];\n' +
+                'export function collect(xs: string[]): void {\n  for (const x of xs) {\n    rows.push(x);\n  }\n}\n',
+            '/x.ts': `${PREAMBLE}import { KEYS, rows } from './keys';\nasync function main() {\n${source}\n}\n`,
+        };
+        const { program, checker } = virtualProgram(files);
+        const parsed = program.getSourceFile('/x.ts');
+        if (parsed === undefined) {
+            throw new Error('fixture not found');
+        }
+        return findShapes(parsed, checker, '/x.ts').map(({ kind }) => kind);
+    }
+
+    test('an imported array literal is bounded in writing', () => {
+        const found = crossFileKinds('await Promise.all(KEYS.map((k) => sync(k)));');
+        expect(found).toContain('bounded-fanout');
+        expect(found).not.toContain('unbounded-fanout');
+    });
+
+    test('an imported accumulator stays a fan-out', () => {
+        expect(crossFileKinds('await Promise.all(rows.map((r) => sync(r)));')).toContain('unbounded-fanout');
+    });
+
+    test('pushing onto an imported name in this file takes it back out', () => {
+        expect(
+            crossFileKinds('for (const x of xs) {\n  KEYS.push(x as never);\n}\nawait Promise.all(KEYS.map((k) => sync(k)));'),
+        ).toContain('unbounded-fanout');
+    });
+});

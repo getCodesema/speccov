@@ -24,7 +24,7 @@ const EXCERPT_LENGTH = 72;
  * leaves the process, whatever its name and whatever its meaning.
  */
 export function findShapes(parsed: ts.SourceFile, checker: ts.TypeChecker, file: string): readonly Site[] {
-    const scope = collectScope(parsed);
+    const scope = collectScope(parsed, checker);
     const sites: Site[] = [];
     /** The `Promise.all` that fans out each `.map()`: both questions carry the same address. */
     const anchoredBy = new Map<ts.Node, ts.Node>();
@@ -160,6 +160,11 @@ function awaitsInFlight(node: ts.Expression, scope: Scope, checker: ts.TypeCheck
  * the program is built, and `scan` had been paying for it without spending it.
  */
 function initialiserOf(node: ts.Identifier, checker: ts.TypeChecker): ts.Expression | undefined {
+    return declarationOf(node, checker)?.initializer;
+}
+
+/** The `const` declaration a name resolves to, wherever the program keeps it. */
+function declarationOf(node: ts.Identifier, checker: ts.TypeChecker): ts.VariableDeclaration | undefined {
     const symbol = checker.getSymbolAtLocation(node);
     if (symbol === undefined) {
         return undefined;
@@ -170,10 +175,7 @@ function initialiserOf(node: ts.Identifier, checker: ts.TypeChecker): ts.Express
         return undefined;
     }
     const list = declaration.parent;
-    if (!ts.isVariableDeclarationList(list) || (list.flags & ts.NodeFlags.Const) === 0) {
-        return undefined;
-    }
-    return declaration.initializer;
+    return ts.isVariableDeclarationList(list) && (list.flags & ts.NodeFlags.Const) !== 0 ? declaration : undefined;
 }
 
 /** Are the items of this collection promises, that is, work another line already started? */
@@ -213,14 +215,99 @@ function elementTypeOf(type: ts.Type, checker: ts.TypeChecker): ts.Type | undefi
  * `const batch = xs.slice(i, i + n)` then `const tasks = batch.map(…)` classifies both. A
  * declaration read after its use is missed — a failure of caution, so it gets flagged.
  *
- * Limited to the current file: without `createProgram`, an imported constant stays opaque.
- * Same failure of caution — flag a bounded site rather than stay silent about one that is
- * not bounded.
+ * An imported constant enters too, through `collectImportedWidths`: `scan` builds a real
+ * program, so a name declared next door is no more opaque than a local one. What stays outside
+ * is what the program cannot show — a parameter, whose width belongs to callers this scope may
+ * not even contain.
  */
-function collectScope(parsed: ts.SourceFile): Scope {
+function collectScope(parsed: ts.SourceFile, checker: ts.TypeChecker): Scope {
     const measured = collectMeasured(parsed);
     const grown = collectGrownContainers(parsed, measured);
-    return { fixed: collectFixedCollections(parsed, measured, grown), measured, grown };
+    const imported = collectImportedWidths(parsed, checker);
+    return { fixed: collectFixedCollections(parsed, measured, grown, imported), measured, grown };
+}
+
+/**
+ * The imported names whose width is written where they are declared.
+ *
+ * `import { C4_FILE_KEYS } from '../../db/schema.js'` then `C4_FILE_KEYS.map(…)` is a fan-out
+ * over a list written by hand in another file. Two real sites in codesema hung on this, and the
+ * comment that used to sit here blamed a missing `createProgram` that `scan` has been building
+ * all along.
+ *
+ * Only the shape that needs no context travels: an array literal, and the width-preserving
+ * calls over it. Anything whose width depends on names of the other file is left alone, because
+ * judging it would take that file's scope, not this one's.
+ */
+function collectImportedWidths(parsed: ts.SourceFile, checker: ts.TypeChecker): ReadonlySet<string> {
+    const names = new Set<string>();
+    for (const statement of parsed.statements) {
+        const bindings = ts.isImportDeclaration(statement) ? statement.importClause?.namedBindings : undefined;
+        if (bindings === undefined || !ts.isNamedImports(bindings)) {
+            continue;
+        }
+        for (const element of bindings.elements) {
+            if (isWrittenWidth(element.name, checker)) {
+                names.add(element.name.text);
+            }
+        }
+    }
+    return names;
+}
+
+/**
+ * Is this imported name a collection whose width is written, and stays written?
+ *
+ * The literal alone proves nothing: `export const rows: string[] = []` is as literal as it
+ * gets, and a `rows.push(…)` in its own file makes it an accumulator. That is the very
+ * inversion `growsInPlace` exists to prevent locally, and importing must not be a way around
+ * it. So the declaring file is read too, for any insertion under that name.
+ *
+ * The name looked for is the DECLARED one, never the local alias: `import { KEYS as k }`
+ * renames here and changes nothing over there.
+ */
+function isWrittenWidth(local: ts.Identifier, checker: ts.TypeChecker): boolean {
+    const declaration = declarationOf(local, checker);
+    if (declaration === undefined || declaration.initializer === undefined || !ts.isIdentifier(declaration.name)) {
+        return false;
+    }
+    if (!isLiteralWidth(declaration.initializer)) {
+        return false;
+    }
+    return !isFilledAnywhere(declaration.getSourceFile(), declaration.name.text);
+}
+
+/** Does this file insert into that name anywhere at all? No loop reading here: any insertion counts. */
+function isFilledAnywhere(parsed: ts.SourceFile, name: string): boolean {
+    let filled = false;
+    const visit = (node: ts.Node): void => {
+        if (filled) {
+            return;
+        }
+        if (fillsInPlace(node) === name) {
+            filled = true;
+            return;
+        }
+        ts.forEachChild(node, visit);
+    };
+    visit(parsed);
+    return filled;
+}
+
+/** A width written on the spot, owing nothing to the scope that surrounds it. */
+function isLiteralWidth(node: ts.Expression): boolean {
+    if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node)) {
+        return isLiteralWidth(node.expression);
+    }
+    if (ts.isArrayLiteralExpression(node)) {
+        return node.elements.every((element) => !ts.isSpreadElement(element) || isLiteralWidth(element.expression));
+    }
+    return (
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        WIDTH_PRESERVING.has(node.expression.name.text) &&
+        isLiteralWidth(node.expression.expression)
+    );
 }
 
 /** What the current file knows about the names it declares, and nothing more. */
@@ -237,8 +324,11 @@ function collectFixedCollections(
     parsed: ts.SourceFile,
     measured: ReadonlySet<string>,
     grown: ReadonlySet<string>,
+    imported: ReadonlySet<string>,
 ): ReadonlySet<string> {
-    const names = new Set<string>();
+    // Seeded before the removal pass, not after: a `.push()` in THIS file on an imported name
+    // takes it back out, exactly as it would a local one.
+    const names = new Set<string>(imported);
     const declaredIn = new Map<string, Set<ts.Node>>();
     const mutations: (readonly [string, ts.Node])[] = [];
     const scope: Scope = { fixed: names, measured, grown };
