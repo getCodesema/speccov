@@ -8,6 +8,14 @@ import { sweep } from './draft/sweep';
 import { mutantsToJson, scanToJson, verdictsToJson } from './json';
 import { reportMutants } from './mutate/report';
 import { mutate } from './mutate/run';
+import {
+    acceptSite,
+    applySiteAnswers,
+    DEFAULT_SCAN_ANSWERS_PATH,
+    loadSiteAnswers,
+    saveSiteAnswers,
+    type SiteAnswer,
+} from './scan/answers';
 import { collectSources, reportScan, scan } from './scan/index';
 import type { Site } from './scan/shapes';
 import type { Lacuna, Rule } from './rule';
@@ -23,6 +31,12 @@ const USAGE = `speccov — finds the behaviours no rule guarantees
   speccov scan <directory> [--tsconfig <path>]
                       Static pass: what is proven by construction, the rule candidates,
                       and what was never looked at. Executes nothing.
+
+  speccov scan <directory> --accept <file:line> [--why <text>]
+                      Answers "this is not a defect" for a site the scan printed. What is
+                      remembered is the shape of the code, not the line, so the answer
+                      survives every insertion above it — and expires when that code
+                      changes, because it is no longer the same question.
 
   speccov mutate <directory|file> --run <command> [--limit N] [--all]
                       Alters the code and re-runs <command>. A mutant that survives is a
@@ -42,7 +56,8 @@ const USAGE = `speccov — finds the behaviours no rule guarantees
   --accept <rule>     Answers "this is intended": the measured threshold becomes a written
                       rule. Repeatable. A later overrun will be a violation.
   --why <text>        Reason attached to the acceptances of this invocation.
-  --answers <path>    Answers file (default: ${DEFAULT_ANSWERS_PATH}).
+  --answers <path>    Answers file (default: ${DEFAULT_ANSWERS_PATH}, or
+                      ${DEFAULT_SCAN_ANSWERS_PATH} for scan).
   --json              Machine-readable output on stdout. Stable schema, no prose to parse.
 
 The rules file default-exports an array of rules, or a function returning one.`;
@@ -200,7 +215,66 @@ async function runScan(argv: readonly string[]): Promise<void> {
         await reportSweep(root, result.sites, argv.includes('--write'));
         return;
     }
-    console.log(argv.includes('--json') ? scanToJson(result) : reportScan(result));
+
+    const answersPath = valueOf(argv, '--answers') ?? DEFAULT_SCAN_ANSWERS_PATH;
+    const known = await loadSiteAnswers(answersPath);
+    const accepts = allValuesOf(argv, '--accept');
+    const answered = applySiteAnswers(result.sites, known);
+    // Recorded from what this pass just found, so the answer bears on the code as it reads
+    // today — never on a line number a later commit would move.
+    if (accepts.length > 0) {
+        await recordSites(answersPath, known, answered.sites, accepts, valueOf(argv, '--why'));
+        return;
+    }
+
+    const kept = { ...result, sites: answered.sites };
+    console.log(argv.includes('--json') ? scanToJson(kept, answered.accepted) : reportScan(kept, answered.accepted));
+}
+
+/**
+ * Writes down "this is not a defect" for the named sites.
+ *
+ * A site is named the way the report prints it, `file:line`, because that is what a human has
+ * in front of them. What gets stored is the shape at that line, not the line: the address is
+ * for the person, the memory is for the code.
+ */
+async function recordSites(
+    path: string,
+    known: readonly SiteAnswer[],
+    sites: readonly Site[],
+    accepts: readonly string[],
+    why: string | undefined,
+): Promise<void> {
+    const today = new Date().toISOString().slice(0, 10);
+    const found = accepts.map((address) => ({ address, site: sites.find((site) => `${site.file}:${site.line}` === address) }));
+    const unknown = found.filter(({ site }) => site === undefined).map(({ address }) => address);
+    if (unknown.length > 0) {
+        throw new Error(`speccov: no site to answer at ${unknown.join(', ')}. Run the scan first and copy an address from it.`);
+    }
+
+    const merged = [...known];
+    for (const { site } of found) {
+        if (site !== undefined) {
+            merged.push(acceptSite(site, today, why));
+        }
+    }
+    await saveSiteAnswers(path, merged);
+    console.log(`  ${accepts.length} site(s) answered in ${path}\n`);
+}
+
+function allValuesOf(argv: readonly string[], flag: string): readonly string[] {
+    const values: string[] = [];
+    for (const [index, argument] of argv.entries()) {
+        if (argument !== flag) {
+            continue;
+        }
+        const value = argv[index + 1];
+        if (value === undefined || value.startsWith('--')) {
+            throw new Error(`speccov: ${flag} expects a value.`);
+        }
+        values.push(value);
+    }
+    return values;
 }
 
 async function reportSweep(root: string, sites: readonly Site[], write: boolean): Promise<void> {

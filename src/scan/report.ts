@@ -82,7 +82,7 @@ export type FlagCoverage = {
 
 export { CANDIDATES };
 
-export function reportScan(result: ScanResult): string {
+export function reportScan(result: ScanResult, accepted: readonly Site[] = []): string {
     const lines = ['', `  ${result.filesScanned} files read, nothing executed.`, ''];
 
     const readable = result.guarantees.flatMap((scope) => (scope.guarantees.kind === 'read' ? [scope] : []));
@@ -139,6 +139,13 @@ export function reportScan(result: ScanResult): string {
         if (sites.length > MAX_SITES_SHOWN) {
             lines.push(`         … and ${sites.length - MAX_SITES_SHOWN} more`);
         }
+    }
+
+    // Counted and never hidden, exactly as in `report()`: a forgotten acceptance is the blind
+    // spot this whole tool exists to refuse.
+    if (accepted.length > 0) {
+        const plural = accepted.length > 1 ? 's' : '';
+        lines.push('', `     · ${accepted.length} site${plural} already answered (see the scan answers file)`);
     }
 
     lines.push('', '  ── Not measured ───────────────────────────────────────────');
