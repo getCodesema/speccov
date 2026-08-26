@@ -1,6 +1,7 @@
 import ts from 'typescript';
 
-export type ShapeKind = 'unbounded-fanout' | 'bounded-fanout' | 'async-per-item' | 'paginated-return';
+export type ShapeKind =
+    'unbounded-fanout' | 'bounded-fanout' | 'in-flight-drain' | 'async-per-item' | 'awaited-in-loop' | 'paginated-return';
 
 export type Site = {
     readonly kind: ShapeKind;
@@ -24,7 +25,7 @@ const EXCERPT_LENGTH = 72;
  * leaves the process, whatever its name and whatever its meaning.
  */
 export function findShapes(parsed: ts.SourceFile, checker: ts.TypeChecker, file: string): readonly Site[] {
-    const scope = collectScope(parsed);
+    const scope = collectScope(parsed, checker);
     const sites: Site[] = [];
     /** The `Promise.all` that fans out each `.map()`: both questions carry the same address. */
     const anchoredBy = new Map<ts.Node, ts.Node>();
@@ -44,12 +45,18 @@ export function findShapes(parsed: ts.SourceFile, checker: ts.TypeChecker, file:
         if (ts.isCallExpression(node) && isPromiseAll(node)) {
             const [argument] = node.arguments;
             if (argument !== undefined) {
-                record(isBoundedWidth(argument, scope) ? 'bounded-fanout' : 'unbounded-fanout', node);
+                // The drain is asked first: it answers a different question from the width.
+                // A collection of promises already in flight holds N of them too, and no
+                // reading of its width can tell it apart from a fan-out.
+                record(drainKind(argument, scope, checker), node);
                 markFannedOut(argument, node, anchoredBy);
             }
         }
         if (ts.isCallExpression(node) && isMapCall(node) && callsAsyncPerItem(node, checker) && !isBoundedWidth(node, scope)) {
             record('async-per-item', anchoredBy.get(node) ?? node);
+        }
+        if (isSerialAwait(node, scope, checker)) {
+            record('awaited-in-loop', node);
         }
         if (ts.isObjectLiteralExpression(node) && hasBoth(node, 'items', 'total')) {
             record('paginated-return', node);
@@ -59,6 +66,222 @@ export function findShapes(parsed: ts.SourceFile, checker: ts.TypeChecker, file:
 
     visit(parsed);
     return sites;
+}
+
+/** How far the walk back to a collection's source is allowed to go. */
+const MAX_WALK = 8;
+
+/**
+ * `for (const x of xs) { await go(x) }` — one call per item, waited for one after the other.
+ *
+ * Everything above this reads concurrency: how many calls leave at once, and under what
+ * ceiling. This reads the opposite shape, and it was the blind spot. A serial `await` has a
+ * concurrency of one, so it never triggered a single question, while its total cost grows with
+ * the collection just as surely as a fan-out's — in time rather than in sockets. Measured on
+ * codesema and codesema-tools: 78 loops of this shape against 17 concurrency sites, so the
+ * pass was silent on the more common of the two.
+ *
+ * `task-isolation.ts:1036` in codesema-tools is the one that made the case: a `for…of` awaiting
+ * a container removal at 30s of timeout apiece, two lines under a `Promise.all` the pass was
+ * asking about wrongly.
+ *
+ * Three filters keep it from becoming noise, since a serial loop is often exactly what someone
+ * wanted:
+ *
+ * - the collection must be unbounded, which is the same reading as everywhere else. `for
+ *   (const t of TABLES)` over a written list asks nothing;
+ * - the call must leave the process — the return type decides, as it does for `.map()`;
+ * - `Promise.all` and friends are left out: they carry their own question, at their own address.
+ */
+function isSerialAwait(node: ts.Node, scope: Scope, checker: ts.TypeChecker): boolean {
+    if (!ts.isForOfStatement(node) && !ts.isForInStatement(node)) {
+        return false;
+    }
+    if (isBoundedWidth(node.expression, scope)) {
+        return false;
+    }
+    return awaitsPerTurn(node.statement, checker);
+}
+
+/**
+ * Is a call awaited on every turn of this body?
+ *
+ * Nested loops are walked into: awaiting once per turn of an inner loop is the same cost, only
+ * worse. Functions are not: a callback declared here runs on its own schedule, which is the
+ * same boundary `callsAsyncPerItem` draws.
+ */
+function awaitsPerTurn(body: ts.Node, checker: ts.TypeChecker): boolean {
+    let found = false;
+    const visit = (node: ts.Node): void => {
+        if (found || ts.isFunctionLike(node)) {
+            return;
+        }
+        const launched = ts.isAwaitExpression(node) ? launchedBy(node.expression, checker) : undefined;
+        if (launched !== undefined && !isPromiseCombinator(launched) && returnsPromise(launched, checker)) {
+            found = true;
+            return;
+        }
+        ts.forEachChild(node, visit);
+    };
+    visit(body);
+    return found;
+}
+
+/**
+ * The call an awaited expression actually launches, past its handlers.
+ *
+ * `await exec(runtime, […]).catch(() => null)` waits on `exec`, and the `.catch` only says what
+ * to do if it fails. Reading the outermost call would have let through `task-isolation.ts:1036`
+ * — a container removal per item, at 30s of timeout apiece, and the very site this rule was
+ * written for. `await p.catch(…)` on a name gives nothing back: there, nothing is launched.
+ */
+function launchedBy(expression: ts.Expression, checker: ts.TypeChecker): ts.CallExpression | undefined {
+    if (!ts.isCallExpression(expression)) {
+        return undefined;
+    }
+    if (!isDecoration(expression, checker)) {
+        return expression;
+    }
+    return ts.isPropertyAccessExpression(expression.expression)
+        ? launchedBy(expression.expression.expression, checker)
+        : undefined;
+}
+
+/** `Promise.all` and its siblings already have a question, and an address of their own. */
+function isPromiseCombinator(call: ts.CallExpression): boolean {
+    return isPromiseAll(call) || isPromiseRace(call) || isPromiseMethod(call, 'any');
+}
+
+/**
+ * Which of the three fan-out verdicts this argument deserves.
+ *
+ * The drain is asked first, because the width only means something once the prior question is
+ * settled: were these promises born here, or merely gathered?
+ */
+function drainKind(argument: ts.Expression, scope: Scope, checker: ts.TypeChecker): ShapeKind {
+    if (awaitsInFlight(argument, scope, checker)) {
+        return 'in-flight-drain';
+    }
+    return isBoundedWidth(argument, scope) ? 'bounded-fanout' : 'unbounded-fanout';
+}
+
+/**
+ * Does this argument gather promises that were ALREADY in flight?
+ *
+ * `Promise.all(users.map((u) => sync(u)))` is a fan-out: every promise is born on that line,
+ * one per item, and asking for a ceiling is the right question. `Promise.all([...inflight.values()])`
+ * is a **drain**: the work was started elsewhere, waiting on it opens nothing, and a ceiling
+ * here would bound nothing at all.
+ *
+ * Width cannot tell the two apart, and neither can the type of the argument: both are
+ * `Promise<T>[]`. What tells them apart is where the collection comes from, so the read walks
+ * back to its source:
+ *
+ * - a width-preserving call is traversed: `[...proxies.values()].map((p) => p.catch(…))`
+ *   decorates promises it did not create, and the receiver is what says so;
+ * - a spread-only array literal is a drain when every one of its spreads is one;
+ * - a name is followed to its initialiser, so `const settled = […].map(…)` is read where it is
+ *   written. A name initialised from a **container** stops the walk and hands over to the type:
+ *   a `Set<Promise<void>>` cannot create what it holds.
+ *
+ * Whatever the walk cannot follow stays a fan-out. Same failure of caution as everywhere in
+ * this file: a drain called a fan-out costs a question, a fan-out called a drain costs a
+ * shipped defect.
+ *
+ * Real sites, all three flagged wrongly before this: `task-isolation.ts:1039`,
+ * `task-runner.ts:3323` and `task-server.ts:3651` in codesema-tools. Not one of them opens a
+ * single outgoing call.
+ */
+function awaitsInFlight(node: ts.Expression, scope: Scope, checker: ts.TypeChecker, depth = 0): boolean {
+    if (depth > MAX_WALK) {
+        return false;
+    }
+    if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node)) {
+        return awaitsInFlight(node.expression, scope, checker, depth + 1);
+    }
+    if (
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        WIDTH_PRESERVING.has(node.expression.name.text)
+    ) {
+        return awaitsInFlight(node.expression.expression, scope, checker, depth + 1);
+    }
+    if (ts.isArrayLiteralExpression(node)) {
+        return (
+            node.elements.length > 0 &&
+            node.elements.every(
+                (element) => ts.isSpreadElement(element) && awaitsInFlight(element.expression, scope, checker, depth + 1),
+            )
+        );
+    }
+    if (ts.isIdentifier(node)) {
+        // A container this file fills itself, in a loop it does not cap, is the fan-out. The
+        // hand-written pool holds promises like any drain, and calling it one would file the
+        // unbounded concurrency under "proven by construction".
+        if (scope.grown.has(node.text)) {
+            return false;
+        }
+        const initialiser = initialiserOf(node, checker);
+        if (initialiser === undefined) {
+            return false;
+        }
+        return ts.isNewExpression(initialiser)
+            ? holdsPromises(node, checker)
+            : awaitsInFlight(initialiser, scope, checker, depth + 1);
+    }
+    // `map.values()`, `set.values()`: the iterator of a container, filled by another line
+    // than this one.
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === 'values') {
+        return holdsPromises(node, checker);
+    }
+    return false;
+}
+
+/**
+ * The expression a name is initialised with, when this pass can see it.
+ *
+ * `const` only: a `let` reassigned further down makes its initialiser prove nothing. The
+ * checker resolves the symbol, so an imported constant is followed as readily as a local one —
+ * the program is built, and `scan` had been paying for it without spending it.
+ */
+function initialiserOf(node: ts.Identifier, checker: ts.TypeChecker): ts.Expression | undefined {
+    return declarationOf(node, checker)?.initializer;
+}
+
+/** The `const` declaration a name resolves to, wherever the program keeps it. */
+function declarationOf(node: ts.Identifier, checker: ts.TypeChecker): ts.VariableDeclaration | undefined {
+    const symbol = checker.getSymbolAtLocation(node);
+    if (symbol === undefined) {
+        return undefined;
+    }
+    const resolved = (symbol.flags & ts.SymbolFlags.Alias) === 0 ? symbol : checker.getAliasedSymbol(symbol);
+    const [declaration] = resolved.declarations ?? [];
+    if (declaration === undefined || !ts.isVariableDeclaration(declaration)) {
+        return undefined;
+    }
+    const list = declaration.parent;
+    return ts.isVariableDeclarationList(list) && (list.flags & ts.NodeFlags.Const) !== 0 ? declaration : undefined;
+}
+
+/** Are the items of this collection promises, that is, work another line already started? */
+function holdsPromises(node: ts.Expression, checker: ts.TypeChecker): boolean {
+    const element = elementTypeOf(checker.getTypeAtLocation(node), checker);
+    return element !== undefined && checker.typeToString(element).startsWith('Promise<');
+}
+
+/** The type of one item of an array, a tuple, or any generic container. */
+function elementTypeOf(type: ts.Type, checker: ts.TypeChecker): ts.Type | undefined {
+    const indexed = checker.getIndexTypeOfType(type, ts.IndexKind.Number);
+    if (indexed !== undefined) {
+        return indexed;
+    }
+    const isReference =
+        (type.flags & ts.TypeFlags.Object) !== 0 && ((type as ts.ObjectType).objectFlags & ts.ObjectFlags.Reference) !== 0;
+    if (!isReference) {
+        return undefined;
+    }
+    const args = checker.getTypeArguments(type as ts.TypeReference);
+    return args.at(-1);
 }
 
 /**
@@ -77,13 +300,99 @@ export function findShapes(parsed: ts.SourceFile, checker: ts.TypeChecker, file:
  * `const batch = xs.slice(i, i + n)` then `const tasks = batch.map(…)` classifies both. A
  * declaration read after its use is missed — a failure of caution, so it gets flagged.
  *
- * Limited to the current file: without `createProgram`, an imported constant stays opaque.
- * Same failure of caution — flag a bounded site rather than stay silent about one that is
- * not bounded.
+ * An imported constant enters too, through `collectImportedWidths`: `scan` builds a real
+ * program, so a name declared next door is no more opaque than a local one. What stays outside
+ * is what the program cannot show — a parameter, whose width belongs to callers this scope may
+ * not even contain.
  */
-function collectScope(parsed: ts.SourceFile): Scope {
+function collectScope(parsed: ts.SourceFile, checker: ts.TypeChecker): Scope {
     const measured = collectMeasured(parsed);
-    return { fixed: collectFixedCollections(parsed, measured), measured };
+    const grown = collectGrownContainers(parsed, measured);
+    const imported = collectImportedWidths(parsed, checker);
+    return { fixed: collectFixedCollections(parsed, measured, grown, imported), measured, grown };
+}
+
+/**
+ * The imported names whose width is written where they are declared.
+ *
+ * `import { C4_FILE_KEYS } from '../../db/schema.js'` then `C4_FILE_KEYS.map(…)` is a fan-out
+ * over a list written by hand in another file. Two real sites in codesema hung on this, and the
+ * comment that used to sit here blamed a missing `createProgram` that `scan` has been building
+ * all along.
+ *
+ * Only the shape that needs no context travels: an array literal, and the width-preserving
+ * calls over it. Anything whose width depends on names of the other file is left alone, because
+ * judging it would take that file's scope, not this one's.
+ */
+function collectImportedWidths(parsed: ts.SourceFile, checker: ts.TypeChecker): ReadonlySet<string> {
+    const names = new Set<string>();
+    for (const statement of parsed.statements) {
+        const bindings = ts.isImportDeclaration(statement) ? statement.importClause?.namedBindings : undefined;
+        if (bindings === undefined || !ts.isNamedImports(bindings)) {
+            continue;
+        }
+        for (const element of bindings.elements) {
+            if (isWrittenWidth(element.name, checker)) {
+                names.add(element.name.text);
+            }
+        }
+    }
+    return names;
+}
+
+/**
+ * Is this imported name a collection whose width is written, and stays written?
+ *
+ * The literal alone proves nothing: `export const rows: string[] = []` is as literal as it
+ * gets, and a `rows.push(…)` in its own file makes it an accumulator. That is the very
+ * inversion `growsInPlace` exists to prevent locally, and importing must not be a way around
+ * it. So the declaring file is read too, for any insertion under that name.
+ *
+ * The name looked for is the DECLARED one, never the local alias: `import { KEYS as k }`
+ * renames here and changes nothing over there.
+ */
+function isWrittenWidth(local: ts.Identifier, checker: ts.TypeChecker): boolean {
+    const declaration = declarationOf(local, checker);
+    if (declaration === undefined || declaration.initializer === undefined || !ts.isIdentifier(declaration.name)) {
+        return false;
+    }
+    if (!isLiteralWidth(declaration.initializer)) {
+        return false;
+    }
+    return !isFilledAnywhere(declaration.getSourceFile(), declaration.name.text);
+}
+
+/** Does this file insert into that name anywhere at all? No loop reading here: any insertion counts. */
+function isFilledAnywhere(parsed: ts.SourceFile, name: string): boolean {
+    let filled = false;
+    const visit = (node: ts.Node): void => {
+        if (filled) {
+            return;
+        }
+        if (fillsInPlace(node) === name) {
+            filled = true;
+            return;
+        }
+        ts.forEachChild(node, visit);
+    };
+    visit(parsed);
+    return filled;
+}
+
+/** A width written on the spot, owing nothing to the scope that surrounds it. */
+function isLiteralWidth(node: ts.Expression): boolean {
+    if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node)) {
+        return isLiteralWidth(node.expression);
+    }
+    if (ts.isArrayLiteralExpression(node)) {
+        return node.elements.every((element) => !ts.isSpreadElement(element) || isLiteralWidth(element.expression));
+    }
+    return (
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        WIDTH_PRESERVING.has(node.expression.name.text) &&
+        isLiteralWidth(node.expression.expression)
+    );
 }
 
 /** What the current file knows about the names it declares, and nothing more. */
@@ -92,13 +401,22 @@ type Scope = {
     readonly fixed: ReadonlySet<string>;
     /** The names whose value this file computes from a collection size. */
     readonly measured: ReadonlySet<string>;
+    /** The containers this file fills itself, from inside an unbounded loop. */
+    readonly grown: ReadonlySet<string>;
 };
 
-function collectFixedCollections(parsed: ts.SourceFile, measured: ReadonlySet<string>): ReadonlySet<string> {
-    const names = new Set<string>();
+function collectFixedCollections(
+    parsed: ts.SourceFile,
+    measured: ReadonlySet<string>,
+    grown: ReadonlySet<string>,
+    imported: ReadonlySet<string>,
+): ReadonlySet<string> {
+    // Seeded before the removal pass, not after: a `.push()` in THIS file on an imported name
+    // takes it back out, exactly as it would a local one.
+    const names = new Set<string>(imported);
     const declaredIn = new Map<string, Set<ts.Node>>();
     const mutations: (readonly [string, ts.Node])[] = [];
-    const scope: Scope = { fixed: names, measured };
+    const scope: Scope = { fixed: names, measured, grown };
     const visit = (node: ts.Node): void => {
         if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer !== undefined) {
             const declaration = node.parent;
@@ -126,6 +444,102 @@ function collectFixedCollections(parsed: ts.SourceFile, measured: ReadonlySet<st
         names.add(name);
     }
     return names;
+}
+
+/**
+ * The containers this file fills itself, from inside a loop it does not cap.
+ *
+ * `const running = new Set<Promise<void>>()` filled by `running.add(go(x))` in a `for…of` holds
+ * promises, and a `Promise.all(running)` really is the fan-out: the concurrency is unbounded,
+ * whichever line opened it. Reading the container's type alone would file the hand-written pool
+ * under "proven by construction" — the exact inversion `growsInPlace` was written to avoid,
+ * one level up.
+ *
+ * The distinction is not decorative: a drain worth the name is filled from somewhere this file
+ * cannot see (a handler, a caller, another module), and there the wait truly opens nothing.
+ */
+function collectGrownContainers(parsed: ts.SourceFile, measured: ReadonlySet<string>): ReadonlySet<string> {
+    const declaredIn = new Map<string, Set<ts.Node>>();
+    const mutations: (readonly [string, ts.Node])[] = [];
+    const scope: Scope = { fixed: new Set(), measured, grown: new Set() };
+    const visit = (node: ts.Node): void => {
+        if (
+            ts.isVariableDeclaration(node) &&
+            ts.isIdentifier(node.name) &&
+            node.initializer !== undefined &&
+            ts.isNewExpression(node.initializer)
+        ) {
+            const containers = declaredIn.get(node.name.text) ?? new Set<ts.Node>();
+            containers.add(containerOf(node));
+            declaredIn.set(node.name.text, containers);
+        }
+        const filled = fillsInPlace(node);
+        if (filled !== undefined) {
+            mutations.push([filled, node]);
+        }
+        ts.forEachChild(node, visit);
+    };
+    visit(parsed);
+
+    const grown = new Set<string>();
+    for (const [name, mutation] of mutations) {
+        const containers = declaredIn.get(name);
+        if (containers !== undefined && fillsFromLoop(mutation, containers, scope)) {
+            grown.add(name);
+        }
+    }
+    return grown;
+}
+
+/** Iterating by call rather than by keyword: as many turns as there are items, all the same. */
+const ITERATIONS = new Set(['forEach', 'map', 'flatMap']);
+
+/**
+ * Is this container filled in bursts, by a loop this file writes?
+ *
+ * The question is narrower than `growsUnboundedly`, and deliberately so. That one answers "how
+ * wide does this get", where a callback is unbounded because nothing says how often it runs.
+ * Here the question is "who opens the concurrency", and the answer is not the same: a container
+ * filled one promise at a time by a handler (`cycleLabelPoses.add(settled)` inside
+ * `trackCycleLabel`, `task-server.ts:1707`) never has two of them launched by the same line.
+ * Waiting on it opens nothing, whereas `for (const x of xs) running.add(go(x))` opens the lot.
+ *
+ * So only a loop counts, and `forEach`/`map` count as loops: the burst is what makes the
+ * concurrency, not the number of items in the end.
+ */
+function fillsFromLoop(mutation: ts.Node, containers: ReadonlySet<ts.Node>, scope: Scope): boolean {
+    let current: ts.Node | undefined = mutation.parent;
+    while (current !== undefined) {
+        if (ts.isForOfStatement(current) || ts.isForInStatement(current)) {
+            return true;
+        }
+        if (ts.isForStatement(current) || ts.isWhileStatement(current) || ts.isDoStatement(current)) {
+            const condition = ts.isForStatement(current) ? current.condition : current.expression;
+            if (!isCappedComparison(condition, scope)) {
+                return true;
+            }
+        }
+        if (
+            ts.isCallExpression(current) &&
+            ts.isPropertyAccessExpression(current.expression) &&
+            ITERATIONS.has(current.expression.name.text)
+        ) {
+            return true;
+        }
+        if (containers.has(current)) {
+            return false;
+        }
+        current = current.parent;
+    }
+    return false;
+}
+
+/** The name of a container this node fills: `xs.add(p)`, `m.set(k, p)`, or an array push. */
+function fillsInPlace(node: ts.Node): string | undefined {
+    if (!ts.isCallExpression(node)) {
+        return undefined;
+    }
+    return receiverOf(node, 'add') ?? receiverOf(node, 'set') ?? growsInPlace(node);
 }
 
 /** The function that carries this node, or the file when it sits at top level. */
@@ -571,7 +985,7 @@ function collectMeasured(parsed: ts.SourceFile): ReadonlySet<string> {
     visit(parsed);
 
     const measured = new Set<string>();
-    const scope: Scope = { fixed: new Set(), measured };
+    const scope: Scope = { fixed: new Set(), measured, grown: new Set() };
     let growing = true;
     while (growing) {
         growing = false;
@@ -613,7 +1027,7 @@ function callsAsyncPerItem(call: ts.CallExpression, checker: ts.TypeChecker): bo
         if (found) {
             return;
         }
-        if (ts.isCallExpression(child) && child !== call && returnsPromise(child, checker)) {
+        if (ts.isCallExpression(child) && child !== call && returnsPromise(child, checker) && !isDecoration(child, checker)) {
             found = true;
             return;
         }
@@ -636,6 +1050,28 @@ function callsAsyncPerItem(call: ts.CallExpression, checker: ts.TypeChecker): bo
         }
     }
     return found;
+}
+
+/** The handlers that attach to a promise instead of starting one. */
+const DECORATIONS = new Set(['then', 'catch', 'finally']);
+
+/**
+ * Does this call decorate a promise that is already running?
+ *
+ * `p.catch(() => null)` returns `Promise<…>` like any launch, so the return type alone counts
+ * it as one outgoing call per item. It starts nothing: the promise was made elsewhere and only
+ * gets a handler here. That is `task-isolation.ts:1031` in codesema-tools, a shutdown drain
+ * counted as a fan-out.
+ *
+ * The receiver decides, not the method name: an `Actor.then()` of one's own is not a promise.
+ * And the walk does not stop here — the receiver and the handler are visited as usual, so
+ * `probe.run().finally(…)` is still one launch per item, through its receiver.
+ */
+function isDecoration(call: ts.CallExpression, checker: ts.TypeChecker): boolean {
+    if (!ts.isPropertyAccessExpression(call.expression) || !DECORATIONS.has(call.expression.name.text)) {
+        return false;
+    }
+    return checker.typeToString(checker.getTypeAtLocation(call.expression.expression)).startsWith('Promise<');
 }
 
 function returnsPromise(call: ts.CallExpression, checker: ts.TypeChecker): boolean {

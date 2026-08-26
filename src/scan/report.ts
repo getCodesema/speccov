@@ -35,6 +35,11 @@ const CANDIDATES: readonly { kind: ShapeKind; rule: string; question: string }[]
         question: 'one asynchronous call per item — should their number grow?',
     },
     {
+        kind: 'awaited-in-loop',
+        rule: 'complexity()',
+        question: 'one awaited call per item, in series — should the wait grow with the collection?',
+    },
+    {
         kind: 'paginated-return',
         rule: 'metamorphic()',
         question: 'should `total` stay the same whatever the page?',
@@ -82,7 +87,7 @@ export type FlagCoverage = {
 
 export { CANDIDATES };
 
-export function reportScan(result: ScanResult): string {
+export function reportScan(result: ScanResult, accepted: readonly Site[] = []): string {
     const lines = ['', `  ${result.filesScanned} files read, nothing executed.`, ''];
 
     const readable = result.guarantees.flatMap((scope) => (scope.guarantees.kind === 'read' ? [scope] : []));
@@ -102,13 +107,22 @@ export function reportScan(result: ScanResult): string {
     }
 
     const bounded = result.sites.filter(({ kind }) => kind === 'bounded-fanout');
+    const drains = result.sites.filter(({ kind }) => kind === 'in-flight-drain');
     lines.push('  ── Proven by construction ─────────────────────────────────');
     lines.push(...everywhere);
     if (bounded.length > 0) {
         const plural = bounded.length > 1 ? 's' : '';
-        lines.push(`     ✓ ${bounded.length} fan-out${plural} bounded in writing (array literal or file-local constant)`);
+        lines.push(
+            `     ✓ ${bounded.length} fan-out${plural} bounded in writing (array literal or a constant written somewhere)`,
+        );
     }
-    if (everywhere.length === 0 && bounded.length === 0) {
+    // Counted and said out loud, like everything this pass sets aside. A silenced drain would
+    // read as a site never looked at.
+    if (drains.length > 0) {
+        const plural = drains.length > 1 ? 's' : '';
+        lines.push(`     ✓ ${drains.length} wait${plural} on promises already in flight (started elsewhere, opens nothing)`);
+    }
+    if (everywhere.length === 0 && bounded.length === 0 && drains.length === 0) {
         lines.push('     nothing to declare');
     }
 
@@ -130,6 +144,13 @@ export function reportScan(result: ScanResult): string {
         if (sites.length > MAX_SITES_SHOWN) {
             lines.push(`         … and ${sites.length - MAX_SITES_SHOWN} more`);
         }
+    }
+
+    // Counted and never hidden, exactly as in `report()`: a forgotten acceptance is the blind
+    // spot this whole tool exists to refuse.
+    if (accepted.length > 0) {
+        const plural = accepted.length > 1 ? 's' : '';
+        lines.push('', `     · ${accepted.length} site${plural} already answered (see the scan answers file)`);
     }
 
     lines.push('', '  ── Not measured ───────────────────────────────────────────');

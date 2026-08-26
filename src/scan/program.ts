@@ -54,6 +54,17 @@ export function analyseScope(root: string, tsconfigPath: string): Analysis {
         return { kind: 'refused', reason: 'no input file in this scope' };
     }
 
+    // Asked before the program is built, not after. A generated scope declares two files, both
+    // of them declarations, and building its program still costs a second and a half: measured
+    // on codesema, six `.nuxt/tsconfig.*` spent 15s of a 35s scan to type four files between
+    // them. The loop below would have skipped every one of them anyway.
+    // Analysed and empty, never refused: there is nothing here to read, which is not the same
+    // as being unable to read it. Refusing would propagate through `delegate` and silence the
+    // whole app the generated scope belongs to — 14s saved against two scopes lost.
+    if (!parsed.fileNames.some(isWorthTyping)) {
+        return { kind: 'analysed', sites: [], filesTyped: 0 };
+    }
+
     const program = ts.createProgram(parsed.fileNames, parsed.options);
     const checker = program.getTypeChecker();
     const sites: Site[] = [];
@@ -61,19 +72,24 @@ export function analyseScope(root: string, tsconfigPath: string): Analysis {
 
     for (const source of program.getSourceFiles()) {
         const path = source.fileName;
-        if (
-            source.isDeclarationFile ||
-            DECLARATION.test(path) ||
-            TEST.test(path) ||
-            RULES.test(path) ||
-            path.includes('/node_modules/')
-        ) {
+        if (source.isDeclarationFile || !isWorthTyping(path)) {
             continue;
         }
         filesTyped += 1;
         sites.push(...findShapes(source, checker, relative(root, path) || path));
     }
     return { kind: 'analysed', sites, filesTyped };
+}
+
+/**
+ * Is this file one the pass would read?
+ *
+ * The same question decides twice: whether a scope is worth a program, and whether a source is
+ * worth walking. Two lists would drift, and the first one would then pay for scopes the second
+ * throws away.
+ */
+function isWorthTyping(path: string): boolean {
+    return !DECLARATION.test(path) && !TEST.test(path) && !RULES.test(path) && !path.includes('/node_modules/');
 }
 
 /** Analyses each referenced project and joins their sites. One unreadable refuses them all. */

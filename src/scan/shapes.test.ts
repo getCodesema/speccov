@@ -513,3 +513,147 @@ describe('one place, not two', () => {
         expect(kinds('users.map((u) => repo.update(u));')).toEqual(['async-per-item']);
     });
 });
+
+/**
+ * A drain waits for work that another line started. It holds as many promises as a fan-out
+ * and reads the same by width, so every fixture here pairs the drain with the fan-out it must
+ * not be confused with.
+ */
+describe('waiting is not launching', () => {
+    test('a set of promises is drained, not fanned out', () => {
+        const found = kinds('const poses = new Set<Promise<void>>();\nawait Promise.allSettled(poses);');
+        expect(found).toContain('in-flight-drain');
+        expect(found).not.toContain('unbounded-fanout');
+    });
+
+    test('the values of a map of promises are drained', () => {
+        const found = kinds('const inflight = new Map<string, Promise<void>>();\nawait Promise.all([...inflight.values()]);');
+        expect(found).toContain('in-flight-drain');
+        expect(found).not.toContain('unbounded-fanout');
+    });
+
+    test('two spreads of promises stay a drain', () => {
+        const source =
+            'const inflight = new Map<string, Promise<void>>();\n' +
+            'const abandons = new Set<Promise<void>>();\n' +
+            'await Promise.allSettled([...inflight.values(), ...abandons]);';
+        expect(kinds(source)).toContain('in-flight-drain');
+    });
+
+    test('decorating promises in flight does not launch them', () => {
+        const source =
+            'const proxies = new Map<string, Promise<void>>();\n' +
+            'const settled = [...proxies.values()].map((p) => p.catch(() => null));\n' +
+            'await Promise.all(settled);';
+        const found = kinds(source);
+        expect(found).toContain('in-flight-drain');
+        expect(found).not.toContain('unbounded-fanout');
+        // The `.map()` decorates, so it is not one outgoing call per item either.
+        expect(found).not.toContain('async-per-item');
+    });
+
+    test('a name holding a real fan-out stays a fan-out', () => {
+        const found = kinds('const tasks = users.map((u) => sync(u));\nawait Promise.all(tasks);');
+        expect(found).toContain('unbounded-fanout');
+        expect(found).not.toContain('in-flight-drain');
+    });
+
+    test('an array literal of calls launches them here', () => {
+        const found = kinds('await Promise.all([a(), b(), c()]);');
+        expect(found).toContain('bounded-fanout');
+        expect(found).not.toContain('in-flight-drain');
+    });
+
+    test('a decoration on a launch keeps the launch', () => {
+        expect(kinds('users.map((u) => sync(u).finally(() => undefined));')).toContain('async-per-item');
+    });
+
+    test('a let is not followed to its initialiser', () => {
+        const found = kinds(
+            'const inflight = new Map<string, Promise<void>>();\nlet settled = [...inflight.values()];\nawait Promise.all(settled);',
+        );
+        expect(found).not.toContain('in-flight-drain');
+    });
+});
+
+describe('a constant declared next door', () => {
+    function crossFileKinds(source: string): readonly ShapeKind[] {
+        const files = {
+            '/keys.ts':
+                'export const KEYS = ["a", "b", "c"] as const;\n' +
+                // An accumulator over there is an accumulator here: filled in its own file,
+                // under its own name, and the import must not launder it.
+                'export const rows: string[] = [];\n' +
+                'export function collect(xs: string[]): void {\n  for (const x of xs) {\n    rows.push(x);\n  }\n}\n',
+            '/x.ts': `${PREAMBLE}import { KEYS, rows } from './keys';\nasync function main() {\n${source}\n}\n`,
+        };
+        const { program, checker } = virtualProgram(files);
+        const parsed = program.getSourceFile('/x.ts');
+        if (parsed === undefined) {
+            throw new Error('fixture not found');
+        }
+        return findShapes(parsed, checker, '/x.ts').map(({ kind }) => kind);
+    }
+
+    test('an imported array literal is bounded in writing', () => {
+        const found = crossFileKinds('await Promise.all(KEYS.map((k) => sync(k)));');
+        expect(found).toContain('bounded-fanout');
+        expect(found).not.toContain('unbounded-fanout');
+    });
+
+    test('an imported accumulator stays a fan-out', () => {
+        expect(crossFileKinds('await Promise.all(rows.map((r) => sync(r)));')).toContain('unbounded-fanout');
+    });
+
+    test('pushing onto an imported name in this file takes it back out', () => {
+        expect(
+            crossFileKinds('for (const x of xs) {\n  KEYS.push(x as never);\n}\nawait Promise.all(KEYS.map((k) => sync(k)));'),
+        ).toContain('unbounded-fanout');
+    });
+});
+
+/**
+ * The shape the pass never looked at: concurrency of one, cost that grows all the same. The
+ * fixtures pair each site with the loop right next to it that must stay silent, because a
+ * serial loop is very often exactly what someone meant.
+ */
+describe('awaiting in series', () => {
+    test('one awaited call per item is a site', () => {
+        expect(kinds('for (const x of xs) {\n  await sync(x);\n}')).toContain('awaited-in-loop');
+    });
+
+    test('a written collection asks nothing', () => {
+        const found = kinds('const TABLES = ["a", "b"];\nfor (const t of TABLES) {\n  await sync(t);\n}');
+        expect(found).not.toContain('awaited-in-loop');
+    });
+
+    test('a loop that waits for nothing asks nothing', () => {
+        expect(kinds('for (const x of xs) {\n  helpers.countRows(x);\n}')).not.toContain('awaited-in-loop');
+    });
+
+    test('a handler on the call does not hide the call', () => {
+        expect(kinds('for (const x of xs) {\n  await sync(x).catch(() => null);\n}')).toContain('awaited-in-loop');
+    });
+
+    test('awaiting a name launches nothing', () => {
+        const source =
+            'const inflight = new Map<string, Promise<void>>();\nfor (const p of inflight.values()) {\n  await p.catch(() => null);\n}';
+        expect(kinds(source)).not.toContain('awaited-in-loop');
+    });
+
+    test('a Promise.all in a loop keeps its own question, at its own address', () => {
+        const found = kinds('for (const x of xs) {\n  await Promise.all(ids.map((i) => go(i)));\n}');
+        expect(found).toContain('unbounded-fanout');
+        expect(found).not.toContain('awaited-in-loop');
+    });
+
+    test('an await inside a nested loop counts: it is the same cost, worse', () => {
+        expect(kinds('for (const x of xs) {\n  for (const i of ids) {\n    await go(i);\n  }\n}')).toContain('awaited-in-loop');
+    });
+
+    test('an await inside a callback runs on its own schedule', () => {
+        expect(kinds('for (const x of xs) {\n  void (async () => {\n    await sync(x);\n  })();\n}')).not.toContain(
+            'awaited-in-loop',
+        );
+    });
+});

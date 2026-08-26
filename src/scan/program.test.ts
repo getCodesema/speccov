@@ -33,6 +33,7 @@ afterEach(async () => {
     await unlink(join(directory, 'tsconfig.json')).catch(() => {});
     await unlink(join(directory, 'fanout.ts')).catch(() => {});
     await unlink(join(directory, 'fanout.rules.ts')).catch(() => {});
+    await unlink(join(directory, 'types.d.ts')).catch(() => {});
     await rmdir(directory).catch(() => {});
 });
 
@@ -82,4 +83,23 @@ test('a .rules.ts is set aside: scan does not re-read itself', async () => {
     }
     expect(analysis.filesTyped).toBe(1);
     expect(analysis.sites.map((site) => site.kind)).not.toContain('paginated-return');
+});
+
+/**
+ * A generated scope declares nothing but declarations. Building its program cost a second and
+ * a half apiece, and the walk skipped every file it loaded: six of them ate 15s of a 35s scan
+ * on codesema to type four files between them.
+ *
+ * Analysed and empty, never refused: a refusal travels up through `delegate` and would silence
+ * the whole app such a scope belongs to.
+ */
+test('a scope holding only declarations is analysed and empty, not refused', async () => {
+    await unlink(join(directory, 'fanout.ts'));
+    await writeFile(join(directory, 'types.d.ts'), 'export declare const x: number;\n', 'utf8');
+
+    const analysis = analyseScope(directory, join(directory, 'tsconfig.json'));
+
+    expect(analysis.kind).toBe('analysed');
+    expect(analysis.kind === 'analysed' ? analysis.filesTyped : -1).toBe(0);
+    expect(analysis.kind === 'analysed' ? analysis.sites : null).toEqual([]);
 });

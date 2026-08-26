@@ -2,6 +2,7 @@ import type { MutateResult } from './mutate/run';
 import { measurementWindow } from './report';
 import type { Verdict } from './rule';
 import { CANDIDATES, flagCoverage, type ScanResult } from './scan/report';
+import type { Site } from './scan/shapes';
 
 /**
  * Machine-readable output.
@@ -16,7 +17,7 @@ import { CANDIDATES, flagCoverage, type ScanResult } from './scan/report';
  */
 const SCHEMA = 1;
 
-export function scanToJson(result: ScanResult): string {
+export function scanToJson(result: ScanResult, accepted: readonly Site[] = []): string {
     const coverage = flagCoverage(result);
     const [scopesEvaluated = 0] = coverage.map(({ scopesEvaluated: n }) => n);
 
@@ -28,6 +29,11 @@ export function scanToJson(result: ScanResult): string {
         provenByConstruction: {
             flags: coverage.filter(({ offIn }) => offIn.length === 0).map(({ flag, proves }) => ({ flag, proves })),
             boundedFanOut: result.sites.filter(({ kind }) => kind === 'bounded-fanout').length,
+            awaitedInFlight: result.sites.filter(({ kind }) => kind === 'in-flight-drain').length,
+        },
+        alreadyAnswered: {
+            count: accepted.length,
+            sites: accepted.map(({ file, line, excerpt }) => ({ file, line, excerpt })),
         },
         guaranteedByNobody: {
             flags: coverage.filter(({ offIn }) => offIn.length > 0).map(({ flag, proves, offIn }) => ({ flag, proves, offIn })),
