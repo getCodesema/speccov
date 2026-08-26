@@ -75,5 +75,5 @@
             }
         }
     ],
-    "ignorePatterns": ["node_modules", "research", "coverage"]
+    "ignorePatterns": ["node_modules", "research", "coverage", "fixtures/corpus"]
 }

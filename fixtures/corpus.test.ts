@@ -29,8 +29,27 @@ test('the corpus keeps covering both sides: shapes claimed, and lines claimed em
 
     // A corpus that lost its negatives still passes while proving much less. Counted, so that
     // deleting one is a decision rather than an accident.
-    expect(verdict.matched).toBeGreaterThanOrEqual(14);
-    expect(verdict.negatives).toBeGreaterThanOrEqual(10);
+    expect(verdict.matched).toBeGreaterThanOrEqual(23);
+    expect(verdict.negatives).toBeGreaterThanOrEqual(12);
+});
+
+/**
+ * Every shape, at least once, on a directory rather than on a snippet. A kind that stops being
+ * produced at all is the failure a suite of per-shape unit tests cannot see: each of them keeps
+ * passing on its own fixture while the pass, assembled, no longer reports the kind anywhere.
+ */
+test('the seven shapes are all represented in the corpus', async () => {
+    const { sites } = await scan({ root: CORPUS });
+
+    expect([...new Set(sites.map(({ kind }) => kind))].sort()).toEqual([
+        'async-per-item',
+        'awaited-in-loop',
+        'bounded-fanout',
+        'in-flight-drain',
+        'paginated-return',
+        'unbounded-fanout',
+        'unbounded-primitive',
+    ]);
 });
 
 test('a package with its own tsconfig is a second scope, read like the first', async () => {
@@ -50,7 +69,7 @@ test('a package with its own tsconfig is a second scope, read like the first', a
 test('the accounting states what the walk set aside', async () => {
     const result = await scan({ root: CORPUS });
 
-    expect(result.filesScanned).toBe(5);
+    expect(result.filesScanned).toBe(6);
     expect(result.testsExcluded).toBe(1);
     expect(result.skipped.get('vue')).toBe(1);
 });
