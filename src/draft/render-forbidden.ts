@@ -17,8 +17,8 @@ export function renderForbidden(file: string, typeName: string, fields: readonly
     const todos: string[] = [];
     const lines = fields.map((field) => `            ${field.name}: [${valuesOf(field, todos)}],`);
 
-    // An infinite field weighs one value more: the one still to be provided.
-    const widthOf = (field: DomainField): number => field.values.length + (field.finite ? 0 : 1);
+    // An infinite field weighs its boundary values, plus the one still to be provided.
+    const widthOf = (field: DomainField): number => field.values.length + field.edges.length + (field.finite ? 0 : 1);
     const total = fields.reduce((product, field) => product * widthOf(field), 1);
     const shape = fields.map(widthOf).join(' × ');
 
@@ -78,5 +78,7 @@ function valuesOf(field: DomainField, todos: string[]): string {
     }
     todos.push(`provide a value for "${field.name}: ${field.declared}".`);
     const asked = `missing('a value for ${field.name}: ${field.declared}')`;
-    return [asked, ...field.values].join(', ');
+    // The asked value stays first: `allOf()` reads rank 0 as the base case, so an unfinished
+    // draft throws on its very first case instead of announcing a green light.
+    return [asked, ...field.edges, ...field.values].join(', ');
 }

@@ -8,7 +8,25 @@ export type DomainField = {
     readonly declared: string;
     /** False when part of the type is infinite: a `string`, a `number`, an object. */
     readonly finite: boolean;
+    /**
+     * The boundary values the type allows and that nobody writes by hand. Empty on a finite
+     * field, where the compiler already wrote every case.
+     */
+    readonly edges: readonly string[];
 };
+
+/**
+ * The boundary values of a primitive.
+ *
+ * They are mechanical: no business knowledge says that an empty string or a `NaN` deserves a
+ * look, only the type does. That is what separates them from the value a human must still
+ * provide, which stays a `missing()`.
+ *
+ * The lists are deliberately short. `allOf()` multiplies the fields, so each value added here
+ * widens the whole product. Four per type is what earns its place.
+ */
+const STRING_EDGES: readonly string[] = ["''", "' '", "'\\u0301'", "'x'.repeat(10_000)"];
+const NUMBER_EDGES: readonly string[] = ['0', '-1', 'Number.NaN', 'Number.MAX_SAFE_INTEGER'];
 
 export type DomainRead =
     | { readonly kind: 'read'; readonly typeName: string; readonly fields: readonly DomainField[] }
@@ -59,16 +77,31 @@ function field(property: ts.Symbol, at: ts.Node, checker: ts.TypeChecker): Domai
     const parts = type.isUnion() ? type.types : [type];
 
     const values: string[] = [];
+    const edges = new Set<string>();
     let finite = true;
     for (const part of parts) {
         const rendered = literalOf(part);
         if (rendered === undefined) {
             finite = false;
+            for (const edge of edgesOf(part)) {
+                edges.add(edge);
+            }
             continue;
         }
         values.push(rendered);
     }
-    return { name: property.name, values, declared, finite };
+    return { name: property.name, values, declared, finite, edges: [...edges] };
+}
+
+/** The boundary values of an infinite part, or nothing when the type is not a known primitive. */
+function edgesOf(type: ts.Type): readonly string[] {
+    if ((type.flags & ts.TypeFlags.String) !== 0) {
+        return STRING_EDGES;
+    }
+    if ((type.flags & ts.TypeFlags.Number) !== 0) {
+        return NUMBER_EDGES;
+    }
+    return [];
 }
 
 /** The value written as source, or `undefined` when this member is not a literal. */
