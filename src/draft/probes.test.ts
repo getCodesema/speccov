@@ -120,7 +120,11 @@ const NO_FACTORY: DraftSite = {
 };
 
 class SyncScreens {
-    constructor(private readonly screens: { fetchState(id: string): Promise<unknown> }) {}
+    private readonly screens: { fetchState(id: string): Promise<unknown> };
+
+    constructor(screens: { fetchState(id: string): Promise<unknown> }) {
+        this.screens = screens;
+    }
 
     async run(all: readonly { readonly id: string }[]): Promise<unknown[]> {
         return Promise.all(all.map((screen) => this.screens.fetchState(screen.id)));
@@ -170,7 +174,11 @@ describe('a draft with no harvested factory', () => {
         // The measured code calls a second member, which nothing doubles. The draft must stop
         // and name it, rather than measure a green light obtained on `undefined`.
         class OtherUsage {
-            constructor(private readonly screens: { describe(id: string): string }) {}
+            private readonly screens: { describe(id: string): string };
+
+            constructor(screens: { describe(id: string): string }) {
+                this.screens = screens;
+            }
 
             async run(all: readonly { readonly id: string }[]): Promise<unknown[]> {
                 return all.map((screen) => this.screens.describe(screen.id));

@@ -48,7 +48,7 @@ export function analyseScope(root: string, tsconfigPath: string): Analysis {
     // Stopping there silenced four scopes out of nineteen in a real-world monorepo.
     const references = parsed.projectReferences ?? [];
     if (parsed.fileNames.length === 0 && references.length > 0) {
-        return delegate(root, tsconfigPath, references);
+        return delegate(root, references);
     }
     if (parsed.fileNames.length === 0) {
         return { kind: 'refused', reason: 'no input file in this scope' };
@@ -93,7 +93,7 @@ function isWorthTyping(path: string): boolean {
 }
 
 /** Analyses each referenced project and joins their sites. One unreadable refuses them all. */
-function delegate(root: string, tsconfigPath: string, references: readonly ts.ProjectReference[]): Analysis {
+function delegate(root: string, references: readonly ts.ProjectReference[]): Analysis {
     const sites: Site[] = [];
     let filesTyped = 0;
     for (const reference of references) {

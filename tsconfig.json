@@ -10,6 +10,13 @@
         "exactOptionalPropertyTypes": true,
         "noImplicitOverride": true,
         "noFallthroughCasesInSwitch": true,
+        "noUnusedLocals": true,
+        "noUnusedParameters": true,
+        "noImplicitReturns": true,
+        "noUncheckedSideEffectImports": true,
+        "allowUnreachableCode": false,
+        "allowUnusedLabels": false,
+        "erasableSyntaxOnly": true,
         "verbatimModuleSyntax": true,
         "noEmit": true,
         "skipLibCheck": true
