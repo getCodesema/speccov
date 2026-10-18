@@ -105,13 +105,14 @@ async function* walkConfigs(directory: string): AsyncGenerator<string> {
     if (entries === undefined) {
         return;
     }
-    for (const entry of entries) {
-        const path = join(directory, entry.name);
-        if (entry.isDirectory() && !IGNORED.has(entry.name)) {
-            yield* walkConfigs(path);
-        } else if (entry.isFile() && entry.name === 'tsconfig.json') {
-            yield path;
-        }
+    // The order the filesystem lists entries in is not a contract: a scope comes before the
+    // ones nested in it, and siblings come by name, so the report reads the same everywhere.
+    if (entries.some((entry) => entry.isFile() && entry.name === 'tsconfig.json')) {
+        yield join(directory, 'tsconfig.json');
+    }
+    const directories = entries.filter((entry) => entry.isDirectory() && !IGNORED.has(entry.name));
+    for (const entry of directories.sort((a, b) => a.name.localeCompare(b.name))) {
+        yield* walkConfigs(join(directory, entry.name));
     }
 }
 
