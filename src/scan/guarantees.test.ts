@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdtemp, rmdir, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rmdir, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { readGuarantees, type Guarantee } from './guarantees';
 
 let directory = '';
@@ -274,5 +274,56 @@ describe('unrecognised option value', () => {
 
         expect(read.kind === 'read' && read.unrecognised).toEqual(['target']);
         await unlink(at).catch(() => {});
+    });
+});
+
+describe('strict by default', () => {
+    const typescript = (): string => join(directory, 'node_modules', 'typescript');
+
+    async function installTypeScript(version: string): Promise<void> {
+        await mkdir(typescript(), { recursive: true });
+        await writeFile(join(typescript(), 'package.json'), JSON.stringify({ name: 'typescript', version }), 'utf8');
+    }
+
+    afterEach(async () => {
+        await unlink(join(typescript(), 'package.json')).catch(() => {});
+        await rmdir(typescript()).catch(() => {});
+        await rmdir(join(directory, 'node_modules')).catch(() => {});
+    });
+
+    test('a TypeScript 6 project is strict without writing it', async () => {
+        await installTypeScript('6.0.3');
+        await write({ compilerOptions: {} });
+
+        const read = readGuarantees(path);
+
+        expect(read.kind === 'read' && flagOf(read.flags, 'strictNullChecks')?.enabled).toBe(true);
+    });
+
+    test('the project is found from a relative path, as the scan passes it', async () => {
+        await installTypeScript('6.0.3');
+        await write({ compilerOptions: {} });
+
+        const read = readGuarantees(relative(process.cwd(), path));
+
+        expect(read.kind === 'read' && flagOf(read.flags, 'strictNullChecks')?.enabled).toBe(true);
+    });
+
+    test('a TypeScript 6 project that writes strict: false is not', async () => {
+        await installTypeScript('6.0.3');
+        await write({ compilerOptions: { strict: false } });
+
+        const read = readGuarantees(path);
+
+        expect(read.kind === 'read' && flagOf(read.flags, 'strictNullChecks')?.enabled).toBe(false);
+    });
+
+    test('a TypeScript 5 project is not strict without writing it', async () => {
+        await installTypeScript('5.9.3');
+        await write({ compilerOptions: {} });
+
+        const read = readGuarantees(path);
+
+        expect(read.kind === 'read' && flagOf(read.flags, 'strictNullChecks')?.enabled).toBe(false);
     });
 });

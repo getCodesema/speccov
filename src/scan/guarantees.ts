@@ -1,4 +1,5 @@
-import { dirname, join } from 'node:path';
+import { createRequire } from 'node:module';
+import { dirname, join, resolve } from 'node:path';
 import ts from 'typescript';
 
 export type Guarantee = {
@@ -102,7 +103,32 @@ function readScope(tsconfigPath: string, seen: Set<string>): Guarantees {
     if (references.length > 0 && parsed.fileNames.length === 0) {
         return delegated(tsconfigPath, references, seen, unrecognised);
     }
-    return { kind: 'read', flags: flagsOf(parsed.options), unrecognised: [...new Set(unrecognised)] };
+    return {
+        kind: 'read',
+        flags: flagsOf(parsed.options, strictByDefault(dirname(tsconfigPath))),
+        unrecognised: [...new Set(unrecognised)],
+    };
+}
+
+/**
+ * TypeScript 6 turned `strict` on by default. The default that counts is the one of the
+ * compiler the project runs, not the one shipped here: read with ours, a TS 6 project that
+ * never writes `strict` was called lukewarm in every scope.
+ */
+function strictByDefault(directory: string): boolean {
+    return Number(projectTypeScriptVersion(directory).split('.')[0]) >= 6;
+}
+
+/** The version of the TypeScript the project resolves, or ours when it resolves none. */
+function projectTypeScriptVersion(directory: string): string {
+    try {
+        const manifest: unknown = createRequire(join(resolve(directory), 'tsconfig.json'))('typescript/package.json');
+        const version = (manifest as { version?: unknown }).version;
+        return typeof version === 'string' ? version : ts.version;
+    } catch {
+        // TODO(ceiling): no TypeScript resolvable from the project, ours stands in and can call a TS 6 project lukewarm: declare it in "Not measured".
+        return ts.version;
+    }
 }
 
 /**
@@ -192,8 +218,8 @@ function resolveReference(path: string): string | undefined {
     return ts.sys.fileExists(path) ? path : undefined;
 }
 
-function flagsOf(options: ts.CompilerOptions): readonly Guarantee[] {
-    const strict = options.strict === true;
+function flagsOf(options: ts.CompilerOptions, strictDefault: boolean): readonly Guarantee[] {
+    const strict = options.strict ?? strictDefault;
     const read = (flag: string): unknown => (options as Record<string, unknown>)[flag];
 
     return FLAGS.map(({ flag, proves, impliedByStrict }) => ({
