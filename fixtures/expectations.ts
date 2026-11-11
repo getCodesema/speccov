@@ -34,7 +34,7 @@ export async function readMarkers(root: string): Promise<readonly Marker[]> {
 function parse(file: string, lines: readonly string[]): readonly Marker[] {
     const markers: Marker[] = [];
     for (const [index, line] of lines.entries()) {
-        const claim = MARKER.exec(line ?? '')?.groups?.claim;
+        const claim = MARKER.exec(line ?? '')?.groups?.['claim'];
         if (claim === undefined) {
             continue;
         }
