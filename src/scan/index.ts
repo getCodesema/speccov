@@ -1,9 +1,11 @@
-import { existsSync, type Dirent } from 'node:fs';
+import type { Dirent } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
-import { dirname, join, relative, resolve } from 'node:path';
+import { join, relative } from 'node:path';
+import { climbFor } from './climb';
 import { readGuarantees } from './guarantees';
 import { analyseScope } from './program';
 import { dropIgnored } from './ignored';
+import { loadIgnore, type Ignore } from './speccovignore';
 import type { Scope } from './report';
 import type { ScanResult } from './report';
 import { type Site } from './shapes';
@@ -35,9 +37,11 @@ export async function scan({ root, tsconfig }: ScanOptions): Promise<ScanResult>
         path: relative(root, path) || path,
         guarantees: readGuarantees(path),
     }));
+    const isIgnored = await loadIgnore(root);
     // Type checking happens per scope: one TypeScript program per tsconfig.
     const seen = new Set<string>();
     const sites: Site[] = [];
+    let ignoredSites = 0;
     const refused: { path: string; reason: string }[] = [];
     for (const path of configs) {
         const analysis = analyseScope(root, path);
@@ -56,20 +60,41 @@ export async function scan({ root, tsconfig }: ScanOptions): Promise<ScanResult>
             // on the same line. The same site seen through two scopes yields the same excerpt, so
             // the duplicate is still dropped.
             const key = `${site.kind}\u0000${site.file}\u0000${site.line}\u0000${site.excerpt}`;
-            if (!seen.has(key)) {
-                seen.add(key);
-                sites.push(site);
+            if (seen.has(key)) {
+                continue;
             }
+            seen.add(key);
+            // Still type-checked with the rest of its scope: only its questions are left out.
+            if (isIgnored(join(root, site.file))) {
+                ignoredSites += 1;
+                continue;
+            }
+            sites.push(site);
         }
     }
 
+    const { ignoredFiles, ...accounted } = await account(root, isIgnored);
+    return { guarantees, sites, ...accounted, ignored: { files: ignoredFiles, sites: ignoredSites }, refused };
+}
+
+type Accounting = Pick<ScanResult, 'filesScanned' | 'unreadable' | 'skipped' | 'testsExcluded'> & {
+    readonly ignoredFiles: number;
+};
+
+/** The walk only serves honest accounting: what was read, and what was not looked at. */
+async function account(root: string, isIgnored: Ignore): Promise<Accounting> {
     const skipped = new Map<string, number>();
     let filesScanned = 0;
     let testsExcluded = 0;
+    let ignoredFiles = 0;
 
-    // The walk now only serves honest accounting: what was not looked at.
     const { paths, unreadable } = await walkTracked(root);
     for (const path of paths) {
+        // Asked first: a file the project set aside is neither "not parsed" nor "a test".
+        if (isIgnored(path)) {
+            ignoredFiles += 1;
+            continue;
+        }
         const unparsed = UNPARSED.exec(path)?.[1];
         if (unparsed !== undefined) {
             skipped.set(unparsed, (skipped.get(unparsed) ?? 0) + 1);
@@ -81,7 +106,7 @@ export async function scan({ root, tsconfig }: ScanOptions): Promise<ScanResult>
         }
         filesScanned += 1;
     }
-    return { guarantees, sites, filesScanned, unreadable, skipped, testsExcluded, refused };
+    return { filesScanned, unreadable, skipped, testsExcluded, ignoredFiles };
 }
 
 /** Everything the walk finds, minus what the repository sets aside, plus what it could not open. */
@@ -136,21 +161,8 @@ async function findConfigs(root: string): Promise<readonly string[]> {
  * levels above the project no longer describes it.
  */
 function climbForConfig(root: string): readonly string[] {
-    let current = resolve(root);
-    for (;;) {
-        const candidate = join(current, 'tsconfig.json');
-        if (existsSync(candidate)) {
-            return [candidate];
-        }
-        if (existsSync(join(current, '.git'))) {
-            return [];
-        }
-        const parent = dirname(current);
-        if (parent === current) {
-            return [];
-        }
-        current = parent;
-    }
+    const found = climbFor('tsconfig.json', root);
+    return found === undefined ? [] : [found];
 }
 
 /** The production TypeScript files, tests excluded. Shared with mutation. */

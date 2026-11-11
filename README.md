@@ -288,6 +288,29 @@ Concluding on that would produce ten false alarms on a project that is in fact f
 it ignores is TS18003 ("no inputs were found"), by name, because it bears on the files to
 compile and never on the `compilerOptions`.
 
+### Setting a directory aside
+
+A test harness or a browser-side client is real code, but not where a value enters the
+system, and its sites drown the ones that matter. Nothing tells that from the code alone
+without guessing by name. So the project says it, in a `.speccovignore` at its root:
+
+```
+# not where a value enters the system
+tools/
+apps/*/src/generated/**
+*.actions.ts
+```
+
+The syntax is the subset of `.gitignore` a perimeter needs: `*`, `?`, `**`, comments, a
+leading `/` to anchor, and a line without a slash matching at any depth. A negation (`!`)
+is refused rather than misread. The file is found from the scanned directory upwards, and
+its patterns are relative to where it sits, so the same line holds for `scan .` and for
+`scan apps/api`.
+
+What is set aside is counted, never silenced: the report ends with
+`42 file(s) set aside by .speccovignore, 334 site(s) with them.`, and the JSON carries the
+same two numbers under `notMeasured.ignored`.
+
 ## Accepting a gap promotes it to a rule
 
 This is the heart of the product: **the human answer gets mechanised**.

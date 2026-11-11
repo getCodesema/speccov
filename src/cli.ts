@@ -33,7 +33,9 @@ const USAGE = `speccov — finds the behaviours no rule guarantees
 
   speccov scan <directory> [--tsconfig <path>]
                       Static pass: what is proven by construction, the rule candidates,
-                      and what was never looked at. Executes nothing.
+                      and what was never looked at. Executes nothing. A .speccovignore
+                      (same syntax as a .gitignore) sets directories aside: the report
+                      counts what it left out.
 
   speccov scan <directory> --accept <file:line> [--why <text>]
                       Answers "this is not a defect" for a site the scan printed. What is
