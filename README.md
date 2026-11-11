@@ -8,6 +8,31 @@ questions.
 Vocabulary: the tool measures **spec coverage**, and the unit it reports is a **gap**.
 "6 gaps left" is the sentence meant to circulate in an MR.
 
+## Install and run
+
+```sh
+npx @codesema/speccov scan src
+```
+
+That is the static pass: it reads the code, executes nothing, and prints the sites worth a
+rule. It needs Node 22.15 or later, and nothing else.
+
+To write rules and run them, add speccov to the project:
+
+```sh
+npm install --save-dev @codesema/speccov
+
+npx speccov scan src                      # what is proven, and what deserves a rule
+npx speccov draft src/users.ts:41         # drafts the rule file for a site the scan printed
+npx speccov src/users.rules.ts            # runs the rules, reports the gaps
+npx speccov mutate src --run "npm test"   # alters the code, lists what nothing caught
+```
+
+A rules file is TypeScript and imports the project's own code. Under Node, speccov compiles
+it on load with the options of the nearest `tsconfig.json`, so path aliases, enums and
+decorators work as they do in the project. On Bun 1.3 or later, `bunx --bun speccov` runs
+the same commands.
+
 ## The problem
 
 Gates prove that the code does what the tests say. Nothing proves that the tests say the
@@ -507,100 +532,6 @@ on the same scope: **25 mutants, 25 killed, no survivor.**
 | 2026-08-22 | One language, TS                                           | Premature multi-language has killed a hundred quality tools           |
 | 2026-08-22 | No dedicated domain name                                   | No value until there is a standalone product                          |
 | 2026-11-11 | Runs on Node as well as on Bun                             | A TypeScript project already has Node: `npx` is enough                |
-
-## Measured on five real repositories
-
-On 2026-08-23, the chain was run over five active TypeScript monorepos — `pi`,
-`prime-agent`, `hermes-agent`, `multica`, `ruflo` — then run again after fixing. Both states
-are here, because a tool that publishes only its successes lies by omission.
-
-|                                    | first pass  | after fixing            |
-| ---------------------------------- | ----------- | ----------------------- |
-| `resource()` sites                 | 198         | **205**                 |
-| of which **known** false positives | ≥ 27        | **2**                   |
-| Drafts produced by `draft`         | **0 / 247** | **93 / 247**            |
-| Decisions left per draft           | —           | min 2, median 4, max 10 |
-
-**The site count goes up, and that is the sound direction.** Thirty-four sites open up,
-reviewed one by one: thirty-two are genuine unbounded fan-outs that the pass was **keeping
-quiet**. An accumulator — `const items = []` filled by a `.push()` inside a loop — was
-classified "bounded in writing" and filed under "proven by construction". That is the
-dangerous direction: a false positive costs a question, a false negative costs a shipped
-defect.
-
-Twenty-seven false positives are closed in the same move, all reviewed in the source code.
-The pattern was the same everywhere: **the tool was flagging the fix, not the defect.**
-
-- a call lodged in a handler (`onClick`) goes out on click, not per item;
-- a promise on the **receiver** — `(await listDir(root)).map((e) => e.path)` — is a batched
-  read;
-- a sliced batch, a worker pool (`new Array(limit).fill(null).map(…)`), a throttle written
-  by hand (`Promise.race` plus a guard on the size): all bounded by a written width, all
-  flagged wrongly.
-
-### The bridge now crosses third-party code
-
-`draft` used to refuse **350 times out of 350**. It assumed a single style: the class with
-constructor dependency injection — that monorepo's, and none of the five repositories'.
-
-The lock was not the shape of the subject but **what carries the probe**. Measured at the
-sites: ninety-seven call `this.ownMethod(item)`, against a dozen for the injected
-dependency, the only case handled at the time. Three unlockings, all derived from the AST:
-
-- **a class with no constructor can be instantiated** — `new C()` was enough;
-- **the probe wraps instead of replacing** — `around()` always calls the real method, so it
-  leaves no value hole to fill;
-- **the counted call comes from the structure** — the one the callback returns, otherwise
-  the only `await` in its body.
-
-What is still refused is refused for a named reason: a `Promise.all(promises)` whose array
-is built elsewhere (58), a probe carried by a module function that cannot be observed
-without a module double (32), a private method no public method calls (20), two awaited
-calls in the same callback — picking one would measure a cog while believing it measures
-the fan-out.
-
-### The complete chain, tried
-
-`scan --draft --write` → fill the holes → strict typecheck → run. All four steps pass, and
-the tool **separates the defect from its fix**:
-
-```
-  ✓ 1 rule held
-  ✗ 1 violation
-
-  violation 1/1   OrgLookupBuggy.run · concurrency via repository.findById
-  “Peak concurrent reads never exceeds 4” does not hold.
-  Peak of 16 concurrent reads against a ceiling of 4 (1→1, 4→4, 16→16)
-```
-
-On the fixed code, `scan` finds **no site**: the fan-out has vanished from the AST. The
-draft can therefore only produce the faulty side — the held side is written by hand.
-
-### The floor of decisions, and what it measures
-
-**Three decisions without a neighbouring spec, two with one.** Each is irreducible, and
-saying so plainly beats a flattering counter:
-
-| decision                          | why it stays                                                                                                |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| the ceiling                       | `resource()` is `origin: 'declared'`: a tolerated peak is a rule, not a measurement                         |
-| the value the probed call returns | a piece of domain data, which the measured code consumes                                                    |
-| the collection                    | derivable from the neighbouring spec when there is one, otherwise nothing says what a valid item looks like |
-
-The distance between three and two measures exactly what the neighbouring spec brings, and
-nothing else. The `own` probe has no value hole, because wrapping costs one decision less
-than doubling.
-
-**The list of decisions is exhaustive, and that is a tested invariant**: every `missing()`
-written into a draft has its line in the list, and the other way round. It was not — the
-count forgot the value returned by the probe. A distracted human would have noticed it at
-run time; an agent could have "fixed" it by removing the guard rail.
-
-### What the pass could not read
-
-`lobehub` — 14,797 files — went past 12 GB of resident memory in 70 seconds, then 20 GB
-without finishing. It is in none of the figures above, and consumption does not follow the
-number of files: `multica`, six times smaller, fits in 3.8 GB.
 
 ## Identified risks
 

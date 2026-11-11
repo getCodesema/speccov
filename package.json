@@ -5,6 +5,10 @@
     "type": "module",
     "license": "MIT",
     "author": "Hasan TASKIN",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/getCodesema/speccov.git"
+    },
     "keywords": [
         "ast",
         "codesema",
