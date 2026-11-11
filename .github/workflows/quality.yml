@@ -32,6 +32,11 @@ jobs:
 
             - run: bun test
 
+            # speccov on its own source, from the working tree rather than the
+            # published package. The scan exits 0 on findings: this step catches a
+            # crash and prints the report, it does not gate on the candidates.
+            - run: bun run scan:self
+
             # The package ships raw TypeScript; publint is what catches an `exports`
             # map or a `files` list that would break on a consumer's install.
             - run: bunx publint

@@ -45,7 +45,8 @@
         "lint": "oxlint",
         "format": "prettier --write . --cache",
         "format:check": "prettier --check . --cache",
-        "verify": "bun run typecheck && bun run lint && bun test"
+        "verify": "bun run typecheck && bun run lint && bun test",
+        "scan:self": "bun bin/speccov.mjs scan src"
     },
     "dependencies": {
         "typescript": "^6.0.3"
