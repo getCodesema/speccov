@@ -9,7 +9,7 @@ const ROLE: DomainField = {
     finite: true,
     edges: [],
 };
-const AREA: DomainField = { name: 'adminAreaId', values: ['null'], declared: 'string | null', finite: false, edges: [] };
+const AREA: DomainField = { name: 'areaId', values: ['null'], declared: 'string | null', finite: false, edges: [] };
 /** A field whose infinite part carries boundary values, as `readDomain()` produces them. */
 const PRICE: DomainField = {
     name: 'prix',
@@ -28,8 +28,8 @@ describe('renderForbidden', () => {
 
     test('a field the type does not bound becomes a call that throws', () => {
         const { content, todos } = renderForbidden('/repo/actors.ts', 'Actor', [ROLE, AREA]);
-        expect(content).toContain("adminAreaId: [missing('a value for adminAreaId: string | null'), null],");
-        expect(todos).toContain('provide a value for "adminAreaId: string | null".');
+        expect(content).toContain("areaId: [missing('a value for areaId: string | null'), null],");
+        expect(todos).toContain('provide a value for "areaId: string | null".');
     });
 
     test('the infinite part counts as one value in the announced total', () => {

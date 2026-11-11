@@ -5,7 +5,7 @@ import { Counter } from '../counter';
 import { countingLogger } from './typeorm';
 
 /**
- * Proof against a real TypeORM and a real Postgres: the N+1 in `list-admin-users` is
+ * Proof against a real TypeORM and a real Postgres: the N+1 in `list-members` is
  * detected through the real stack, transaction noise included.
  *
  *   docker run -d --rm -e POSTGRES_PASSWORD=speccov -e POSTGRES_DB=speccov \

@@ -25,7 +25,7 @@ const DECLARATION = /\.d\.ts$/u;
  * A `.rules.ts` holds the doubles that measure the site — among them a
  * `mockResolvedValue({ items, total })` that looks like a paginated return. Without this
  * exclusion, `scan` re-reads its own drafts and reports its own fixture: measured on a
- * real-world monorepo, `list-admin-users.rules.ts:84` came out a `metamorphic()` candidate.
+ * real-world monorepo, a rules file came out a `metamorphic()` candidate.
  */
 const RULES = /\.rules\.[cm]?ts$/u;
 

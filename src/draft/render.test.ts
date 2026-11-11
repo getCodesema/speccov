@@ -4,17 +4,17 @@ import type { Harvest } from './harvest';
 import { renderDraft } from './render';
 
 const SITE: DraftSite = {
-    file: '/repo/list-admin-users.ts',
+    file: '/repo/list-members.ts',
     line: 41,
     subject: {
         kind: 'class',
-        className: 'ListAdminUsers',
+        className: 'ListMembers',
         methodName: 'run',
         constructorParameters: [
-            { name: 'areaScope', type: 'AreaScopeService' },
+            { name: 'regionScope', type: 'RegionScopeService' },
             { name: 'organizations', type: 'OrganizationRepositoryPort' },
         ],
-        entryParameters: [{ name: 'command', type: "Parameters<ListAdminUsers['run']>[0]" }],
+        entryParameters: [{ name: 'command', type: "Parameters<ListMembers['run']>[0]" }],
     },
     probe: { kind: 'injected', property: 'organizations', method: 'findById' },
     collection: 'candidates',
@@ -23,25 +23,25 @@ const SITE: DraftSite = {
 };
 
 const HARVEST: Harvest = {
-    specFile: '/repo/list-admin-users.spec.ts',
+    specFile: '/repo/list-members.spec.ts',
     mockBuilders: [
-        { name: 'buildMockAreaScope', from: '../../test-support/mock-area-scope' },
+        { name: 'buildMockRegionScope', from: '../../test-support/mock-region-scope' },
         { name: 'buildMockOrganizations', from: '../../test-support/mock-organization-repository' },
     ],
     helpers: ['buildUser'],
     localBuilders: [],
     mocks: [],
-    constructorArguments: ['areaScope', 'organizations'],
+    constructorArguments: ['regionScope', 'organizations'],
 };
 
 describe('renderDraft', () => {
     test('writes next to the use case, like its spec', () => {
-        expect(renderDraft(SITE, HARVEST).path).toBe('/repo/list-admin-users.rules.ts');
+        expect(renderDraft(SITE, HARVEST).path).toBe('/repo/list-members.rules.ts');
     });
 
     test('matches each dependency to its double factory', () => {
         const { content } = renderDraft(SITE, HARVEST);
-        expect(content).toContain('const areaScope = buildMockAreaScope();');
+        expect(content).toContain('const regionScope = buildMockRegionScope();');
         expect(content).toContain('const organizations = buildMockOrganizations();');
     });
 
@@ -51,7 +51,7 @@ describe('renderDraft', () => {
 
     test('calls the public entry point with the constructor order', () => {
         const { content } = renderDraft(SITE, HARVEST);
-        expect(content).toContain('const subject = new ListAdminUsers(areaScope, organizations);');
+        expect(content).toContain('const subject = new ListMembers(regionScope, organizations);');
         expect(content).toContain('await subject.run(command());');
     });
 
@@ -61,7 +61,7 @@ describe('renderDraft', () => {
 
     test('an unfilled hole throws: never a misleading green light', () => {
         const { content } = renderDraft(SITE, HARVEST);
-        expect(content).toContain("throw new Error('TODO speccov: provide a valid command for ListAdminUsers.run().')");
+        expect(content).toContain("throw new Error('TODO speccov: provide a valid command for ListMembers.run().')");
         expect(content).toContain('function missing(what: string): never');
     });
 
@@ -69,8 +69,8 @@ describe('renderDraft', () => {
         const { content, todos } = renderDraft(SITE, { ...HARVEST, mockBuilders: [] });
         // `missing()` returns `never`: it threw at wiring, and the subject could not even be
         // instantiated. The double now exists and throws only on the member actually asked for.
-        expect(content).toContain("const areaScope = only<ConstructorParameters<typeof ListAdminUsers>[0]>('areaScope');");
-        expect(todos.join(' ')).toContain('provide a double for "areaScope: AreaScopeService"');
+        expect(content).toContain("const regionScope = only<ConstructorParameters<typeof ListMembers>[0]>('regionScope');");
+        expect(todos.join(' ')).toContain('provide a double for "regionScope: RegionScopeService"');
     });
 
     test('without a harvested factory, the probe no longer demands a runner mock', () => {
@@ -79,14 +79,14 @@ describe('renderDraft', () => {
         const { content } = renderDraft(SITE, { ...HARVEST, mockBuilders: [] });
         expect(content).not.toContain('mockImplementation');
         expect(content).toContain(
-            "const organizations = only<ConstructorParameters<typeof ListAdminUsers>[1]>('organizations', 'findById', () =>",
+            "const organizations = only<ConstructorParameters<typeof ListMembers>[1]>('organizations', 'findById', () =>",
         );
     });
 
     test('without a neighbouring spec, all the wiring becomes a hole', () => {
         const { todos } = renderDraft(SITE, undefined);
         expect(todos).toContain('wire this collection onto the dependency that produces it.');
-        expect(todos).toContain('provide a valid command for ListAdminUsers.run().');
+        expect(todos).toContain('provide a valid command for ListMembers.run().');
         // Placing the probe removes the "provide a double" decision, never the one about the
         // value it returns: the measured code consumes it.
         expect(todos).toContain('provide the value organizations.findById() must return.');
@@ -105,14 +105,14 @@ describe('renderDraft', () => {
             localBuilders: [
                 {
                     name: 'buildScopedQuery',
-                    returns: "Parameters<ListAdminUsers['run']>[0]",
-                    source: "function buildScopedQuery(): Parameters<ListAdminUsers['run']>[0] {\n    return { limit: 10 };\n}",
+                    returns: "Parameters<ListMembers['run']>[0]",
+                    source: "function buildScopedQuery(): Parameters<ListMembers['run']>[0] {\n    return { limit: 10 };\n}",
                     exampleCall: undefined,
                 },
             ],
         };
         const { content, todos } = renderDraft(SITE, withBuilder);
-        expect(content).toContain("function command(): Parameters<ListAdminUsers['run']>[0] {");
+        expect(content).toContain("function command(): Parameters<ListMembers['run']>[0] {");
         expect(content).toContain('return { limit: 10 };');
         expect(todos.join(' ')).not.toContain('provide a valid command');
     });

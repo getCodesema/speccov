@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { extractSite, type DraftSite, type Subject } from './extract';
 
-const USE_CASE = `export class ListAdminUsers {
+const USE_CASE = `export class ListMembers {
     constructor(
-        private readonly areaScope: AreaScopeService,
+        private readonly regionScope: RegionScopeService,
         private readonly organizations: OrganizationRepositoryPort,
         private readonly users: UserRepositoryPort,
     ) {}
@@ -49,7 +49,7 @@ function refusal(source: string, line: number): string {
 describe('extractSite · the class with injected dependencies', () => {
     test('picks up the class and the collection being iterated', () => {
         const site = drafted(USE_CASE, MAP_LINE);
-        expect(asClass(site.subject).className).toBe('ListAdminUsers');
+        expect(asClass(site.subject).className).toBe('ListMembers');
         expect(site.collection).toBe('candidates');
     });
 
@@ -59,7 +59,7 @@ describe('extractSite · the class with injected dependencies', () => {
 
     test('picks up the constructor parameters, in order', () => {
         expect(asClass(drafted(USE_CASE, MAP_LINE).subject).constructorParameters).toEqual([
-            { name: 'areaScope', type: 'AreaScopeService' },
+            { name: 'regionScope', type: 'RegionScopeService' },
             { name: 'organizations', type: 'OrganizationRepositoryPort' },
             { name: 'users', type: 'UserRepositoryPort' },
         ]);

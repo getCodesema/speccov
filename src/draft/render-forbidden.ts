@@ -69,7 +69,7 @@ ${lines.join('\n')}
 
 /**
  * The values of the field. The infinite part becomes a call that throws, named by its type:
- * the compiler knows `adminAreaId` is a `string`, it does not know that "an area" and "no
+ * the compiler knows `areaId` is a `string`, it does not know that "an area" and "no
  * area" are the two cases that matter.
  */
 function valuesOf(field: DomainField, todos: string[]): string {

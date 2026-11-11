@@ -11,7 +11,7 @@ const pages = [
 describe('metamorphic', () => {
     test('an invariant observation holds the rule', async () => {
         const rule = metamorphic({
-            name: 'list-admin-users · total',
+            name: 'list-members · total',
             intention: 'The announced total does not depend on the page requested',
             variants: pages,
             observe: () => 42,
@@ -23,7 +23,7 @@ describe('metamorphic', () => {
 
     test('a total that follows the page does not hold the rule', async () => {
         const rule = metamorphic({
-            name: 'list-admin-users · total',
+            name: 'list-members · total',
             intention: 'The announced total does not depend on the page requested',
             variants: pages,
             // The real defect: `total: items.length` after filtering.

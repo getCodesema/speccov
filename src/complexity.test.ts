@@ -31,7 +31,7 @@ describe('complexity', () => {
     test('an N+1 does not hold the rule, and the sentence says by how much', async () => {
         const counter = new Counter();
         const rule = complexity({
-            name: 'list-admin-users · SQL queries',
+            name: 'list-members · SQL queries',
             unit: 'SQL queries',
             counter,
             subject: (size) => {
