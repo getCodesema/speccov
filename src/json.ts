@@ -61,6 +61,7 @@ export function scanToJson(result: ScanResult, accepted: readonly Site[] = []): 
             ),
             filesNotParsed: Object.fromEntries(result.skipped),
             testsExcluded: result.testsExcluded,
+            ignored: { files: result.ignored.files, sites: result.ignored.sites },
             unreadable: [...result.unreadable],
             refusedScopes: result.refused.map(({ path, reason }) => ({ path, reason })),
         },

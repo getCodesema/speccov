@@ -12,6 +12,7 @@ function result(overrides: Partial<ScanResult> = {}): ScanResult {
         unreadable: [],
         skipped: new Map(),
         testsExcluded: 0,
+        ignored: { files: 0, sites: 0 },
         refused: [],
         ...overrides,
     };
@@ -57,6 +58,12 @@ describe('reportScan', () => {
 
     test('declares the deliberately excluded tests too', () => {
         expect(reportScan(result({ testsExcluded: 412 }))).toContain('412 test file(s) deliberately excluded');
+    });
+
+    test('declares what the project set aside, sites included', () => {
+        expect(reportScan(result({ ignored: { files: 42, sites: 334 } }))).toContain(
+            '42 file(s) set aside by .speccovignore, 334 site(s) with them.',
+        );
     });
 
     test('concludes nothing when a tsconfig could not be resolved', () => {
@@ -152,6 +159,7 @@ test('a long-winded diagnostic does not drown the report', () => {
         unreadable: [],
         skipped: new Map(),
         testsExcluded: 0,
+        ignored: { files: 0, sites: 0 },
         refused: [],
     });
 

@@ -19,6 +19,8 @@ export type ScanResult = {
     readonly skipped: ReadonlyMap<string, number>;
     /** Test files deliberately set aside. */
     readonly testsExcluded: number;
+    /** What the project's `.speccovignore` left out. Counted, never silenced. */
+    readonly ignored: { readonly files: number; readonly sites: number };
     /** Scopes whose program could not be built. Declared, never guessed at. */
     readonly refused: readonly { readonly path: string; readonly reason: string }[];
 };
@@ -201,6 +203,11 @@ export function reportScan(result: ScanResult, accepted: readonly Site[] = []): 
     }
     if (result.testsExcluded > 0) {
         lines.push(`     ${result.testsExcluded} test file(s) deliberately excluded.`);
+    }
+    if (result.ignored.files > 0) {
+        lines.push(
+            `     ${result.ignored.files} file(s) set aside by .speccovignore, ${result.ignored.sites} site(s) with them.`,
+        );
     }
     if (result.unreadable.length > 0) {
         lines.push(`     ${result.unreadable.length} unreadable path(s): ${result.unreadable.slice(0, 3).join(', ')}`);

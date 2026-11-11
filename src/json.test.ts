@@ -15,6 +15,7 @@ function scanResult(overrides: Partial<ScanResult> = {}): ScanResult {
         unreadable: [],
         skipped: new Map(),
         testsExcluded: 0,
+        ignored: { files: 0, sites: 0 },
         refused: [],
         ...overrides,
     };
@@ -63,6 +64,7 @@ describe('scanToJson', () => {
                 scanResult({
                     skipped: new Map([['vue', 188]]),
                     testsExcluded: 412,
+                    ignored: { files: 42, sites: 334 },
                     refused: [],
                     unreadable: ['broken.ts'],
                 }),
@@ -71,6 +73,7 @@ describe('scanToJson', () => {
 
         expect(payload.notMeasured.filesNotParsed).toEqual({ vue: 188 });
         expect(payload.notMeasured.testsExcluded).toBe(412);
+        expect(payload.notMeasured.ignored).toEqual({ files: 42, sites: 334 });
         expect(payload.notMeasured.unreadable).toEqual(['broken.ts']);
         // The note tells the agent what this pass did NOT do. Keeping it quiet would be a green light.
         expect(payload.notMeasured.behaviour).toBe('this pass is static; nothing was executed');
