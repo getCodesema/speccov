@@ -24,7 +24,7 @@ const EXCERPT_LENGTH = 72;
  * Spots the risky shapes by asking the types rather than guessing.
  *
  * The old pass recognised a read from the method name — `find*`, `get*`, `load*`. Measured on
- * the `apps/api` package of a real-world monorepo: 24 sites seen by type, 20 by name, and
+ * the API package of a real-world monorepo: 24 sites seen by type, 20 by name, and
  * **only 10 in common**. The name misses `update`, `addItem`, `republish`, `notifyRefreshChunk`
  * — one of them a write N+1 — and flags `getCompactDisplayName()`, which only reads memory.
  *
@@ -977,7 +977,7 @@ function isDeclaredArity(node: ts.Expression, scope: Scope): boolean {
  * A ceiling is an expression that no collection size makes grow.
  *
  * The reading is structural, because the top node alone lies: `Math.floor(keys.length * f)`
- * is not a neutral call, it is `keys.length` in disguise. Real site — `sw.ts:367` in that
+ * is not a neutral call, it is `keys.length` in disguise. Real site: a service worker in that
  * monorepo, where the purged share of the cache grows with the cache. Without this descent,
  * widening the sliced batch to the receiver silenced it.
  *

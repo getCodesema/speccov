@@ -66,7 +66,7 @@ test('the same scope in absolute form gives exactly the same sites', () => {
  *
  * A `.rules.ts` doubles the repo to measure the site, and its doubles look like the code
  * they replace — `{ items, total }` up front. Re-read by `scan`, it came back out as a
- * candidate: on a real-world monorepo, `list-admin-users.rules.ts:84` flagged its own fixture.
+ * candidate: on a real-world monorepo, a rules file flagged its own fixture.
  */
 test('a .rules.ts is set aside: scan does not re-read itself', async () => {
     await writeFile(

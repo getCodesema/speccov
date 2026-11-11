@@ -353,7 +353,7 @@ describe('fan-out', () => {
     });
 
     /**
-     * The negative test for the sliced batch. `sw.ts:367` in that monorepo purges a
+     * The negative test for the sliced batch. A service worker in that monorepo purges a
      * **fraction** of the cache: the slice end carries the name of a ceiling and is worth
      * `keys.length * f`. Without the descent into `Math.floor`, the earlier widening silenced it.
      */
@@ -399,7 +399,7 @@ describe('fan-out', () => {
 
 /**
  * The method name no longer decides anything: only its return type counts. Measured on the
- * `apps/api` package of that monorepo, the name missed `update`, `addItem`, `republish` — one
+ * API package of that monorepo, the name missed `update`, `addItem`, `republish` — one
  * of them a write N+1 — and flagged `getCompactDisplayName()`, which only reads memory.
  */
 describe('an async call per item', () => {

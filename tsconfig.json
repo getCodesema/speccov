@@ -23,6 +23,6 @@
     },
     // The corpus under `fixtures/corpus` is compiled by its own tsconfig, the one the scan
     // reads. Checking it a second time here would only give it a second, stricter opinion.
-    "include": ["src", "examples", "fixtures"],
+    "include": ["src", "fixtures"],
     "exclude": ["fixtures/corpus"]
 }

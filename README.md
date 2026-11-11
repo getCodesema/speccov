@@ -69,19 +69,15 @@ Two consequences, and they are not cosmetic:
 
 ## The four rule types
 
-| Type            | What it asserts                                             | The real-world defect it catches                             |
-| --------------- | ----------------------------------------------------------- | ------------------------------------------------------------ |
-| `complexity()`  | The cost does not grow with the input size                  | the N+1 of `list-admin-users.ts:41`                          |
-| `resource()`    | The observed peak stays under a ceiling                     | the 27 unbounded `Promise.all`                               |
-| `metamorphic()` | An observation stays invariant from one variant to the next | the `total: items.length` of `list-admin-users.ts:36`        |
-| `forbidden()`   | No input ever produces that                                 | the "no `adminAreaId` = global access" of `AreaScopeService` |
+| Type            | What it asserts                                             | The defect it catches                          |
+| --------------- | ----------------------------------------------------------- | ---------------------------------------------- |
+| `complexity()`  | The cost does not grow with the input size                  | one query per item: the N+1                    |
+| `resource()`    | The observed peak stays under a ceiling                     | an unbounded `Promise.all`                     |
+| `metamorphic()` | An observation stays invariant from one variant to the next | a `total` computed as `items.length` of a page |
+| `forbidden()`   | No input ever produces that                                 | "no `areaId`" silently meaning "global access" |
 
-```sh
-bun src/cli.ts examples/real-world-findings.rules.ts
-```
-
-All four defects are found. None is caught by the typed lint, the 90% coverage, the
-mutation tests or the repo's e2e: **all of them pass 100% of the existing gates.**
+None of these is caught by a typed lint, a 90% coverage, mutation tests or e2e: **code
+carrying all four can pass 100% of those gates.**
 
 ### `allOf()` — the domain, not a list of cases
 
@@ -91,7 +87,7 @@ suspected. `allOf()` takes the **domain** and produces every case:
 ```ts
 cases: allOf<Actor>({
     role: ['viewer', 'org_admin', 'platform_viewer', 'platform_admin'],
-    adminAreaId: ['area-north', null],
+    areaId: ['area-north', null],
 });
 ```
 
@@ -103,7 +99,7 @@ value of each field. The first counterexample met is therefore **the smallest**,
 shrinking to write: `forbidden()` already keeps the first one, and it turns out to be the
 right one.
 
-On that monorepo's scope defect, the hand-written list found one counterexample. The domain
+On a scope defect of that kind, a hand-written list found one counterexample. The domain
 finds **two**, and puts `viewer without an area` first — a role even less privileged than
 `org_admin`, so a worse hole, that nobody had thought to write.
 
@@ -116,9 +112,6 @@ make twenty-five billion cases — that is a typo, not a domain.
 `complexity()` is default — "the cost does not grow" is a law, not a setting.
 `resource()` makes you choose a ceiling, `forbidden()` and `metamorphic()` make you write a
 business sentence: those are declared rules, and breaking one is a violation.
-
-Four types are enough to cover the four real defects found in a 153k-line repository that
-already passed 100% of its gates (typed lint, 90% coverage, mutation, e2e, API fuzzing).
 
 ## Spec format: no format, a rendering
 
@@ -141,26 +134,21 @@ Immediate value, zero spec to write. And it teaches the user what a rule is.
 
 ## Status: working MVP
 
-One default rule — **complexity** — and its counting probe.
-
-```sh
-bun src/cli.ts examples/list-admin-users.rules.ts
-```
+One default rule, **complexity**, and its counting probe. On a use case that reads one row
+per item, and on its fix, the report is:
 
 ```
   ✓ 1 rule held
   ⚠ 1 gap
 
-  gap 1/1   list-admin-users · current
+  gap 1/1   list-members · current
   “The number of SQL queries grows by ≈ 1 per item (1→1, 2→2, 4→4, 8→8, 16→16). No written
   rule forbids it. Is this intended?”
 
      [y] this is a bug     [n] this is intended
 ```
 
-The example faithfully reproduces the N+1 of a real-world monorepo
-(`list-admin-users.ts:41`) and its fix. **speccov finds the first and validates the second,
-without a single spec being written.** That is the success criterion we set ourselves: a
+**speccov finds the N+1 and validates its fix, without a single spec being written.** That is the success criterion we set ourselves: a
 tool earns trust by first finding again what we already knew.
 
 ### What exists
@@ -175,7 +163,7 @@ tool earns trust by first finding again what we already knew.
 - `Gauge` — the concurrency probe, counterpart of `Counter`
 - `allOf()` — the cartesian product of a finite domain, from the simplest to the most twisted
 - `speccov draft <file> --forbidden <Type>` — the domain written from the type
-- 118 tests, strict typecheck, zero production dependency
+- 473 tests, strict typecheck, one production dependency: `typescript`
 
 ## `speccov scan` — the static pass
 
@@ -191,10 +179,19 @@ The report has **four zones**, and the fourth is the one that makes it honest:
 | -------------------------- | -------------------------------------------------------------- |
 | **Proven by construction** | compiler flags, fixed-arity `Promise.all`                      |
 | **Guaranteed by nobody**   | flags switched off, and the candidate sites for each rule type |
+| **Typed, not bounded**     | parameters that take a whole primitive domain and leave        |
 | **Not measured**           | what the pass did **not** look at, and why                     |
 
 A report that shows only what it managed to verify, without saying what it could not, lies
 by omission. That is the reproach made to a 90% coverage.
+
+### Options
+
+| Option            | What it does                                                                |
+| ----------------- | --------------------------------------------------------------------------- |
+| `--json`          | machine-readable output on stdout, stable schema, every site listed         |
+| `--draft`         | passes every site found to the draft bridge, reports how many became a rule |
+| `--draft --write` | creates those rule files; an existing file is never overwritten             |
 
 ### What it detects
 
@@ -325,7 +322,7 @@ same two numbers under `notMeasured.ignored`.
 This is the heart of the product: **the human answer gets mechanised**.
 
 ```sh
-speccov my.rules.ts --accept 'list-admin-users · current' --why "known N+1, ticket #4"
+speccov my.rules.ts --accept 'list-members · current' --why "known N+1, ticket #4"
 ```
 
 The threshold measured that day becomes a rule written into `.speccov/answers.json` — a file
@@ -336,7 +333,7 @@ The threshold measured that day becomes a rule written into `.speccov/answers.js
     "version": 1,
     "answers": [
         {
-            "rule": "list-admin-users · current",
+            "rule": "list-members · current",
             "magnitude": 1,
             "detail": "The number of SQL queries grows by ≈ 1 per item (1→1, 2→2, …)",
             "at": "2026-08-22",
@@ -428,7 +425,7 @@ de-duplicated `findBy(In(…))` stays constant.
 ## `speccov draft` — the bridge
 
 ```sh
-speccov draft apps/api/.../list-admin-users.ts:41
+speccov draft apps/api/.../list-members.ts:41
 ```
 
 **The bridge is not generation, it is harvesting.** The wiring already exists: in the use
@@ -444,7 +441,7 @@ order). `draft` goes and fetches it, and writes by hand only what is left.
 | The collection of size `size`        | —                                             | ❌ human |
 | A valid command                      | —                                             | ❌ human |
 
-On the real site in that monorepo, **2 decisions** are left instead of a blank page.
+On a real site of that shape, **2 decisions** are left instead of a blank page.
 
 ### Two guarantees
 
@@ -475,7 +472,7 @@ will be gone at run time.
 ```ts
 cases: allOf<Actor>({
     role: ["viewer", "org_admin", "platform_viewer", "platform_admin"],
-    adminAreaId: [missing('a value for adminAreaId: string | null'), null],
+    areaId: [missing('a value for areaId: string | null'), null],
     suspended: [false, true],
 }),
 ```
@@ -564,6 +561,7 @@ on the same scope: **25 mutants, 25 killed, no survivor.**
 | 2026-08-22 | One language, TS                                           | Premature multi-language has killed a hundred quality tools           |
 | 2026-08-22 | No dedicated domain name                                   | No value until there is a standalone product                          |
 | 2026-11-11 | Runs on Node as well as on Bun                             | A TypeScript project already has Node: `npx` is enough                |
+| 2026-11-11 | Published standalone on npm, replacing the first decision  | The extraction kept free on 2026-08-22 is now taken                   |
 
 ## Identified risks
 
@@ -575,7 +573,7 @@ on the same scope: **25 mutants, 25 killed, no survivor.**
    I trust the agent's PR?"
 4. **The N+1 is the worst example to lead with.** It is the only one of the four defects
    with mature competition — QueryGuard, Scout, and Prisma's built-in dataloader. The scope
-   defect of `AreaScopeService` has none: there, the code is correct, typed, tested, and
+   defect has none: there, the code is correct, typed, tested, and
    does the wrong thing. That is where nobody stands opposite.
 5. **`draft` still refuses 62% of third-party sites**, and for named reasons. The biggest —
    a `Promise.all(promises)` whose array is built elsewhere — is worth 58 sites on its own:

@@ -2,8 +2,8 @@
  * The cartesian product of a finite domain, from the simplest case to the most complex.
  *
  * A ban that only tries a hand-written list finds nothing beyond what its author already
- * suspected. The scope defect in `AreaScopeService` was found because someone had thought
- * to write `{ role: 'org_admin', adminAreaId: null }` — not because the tool had gone
+ * suspected. The scope defect in `RegionScopeService` was found because someone had thought
+ * to write `{ role: 'org_admin', areaId: null }` — not because the tool had gone
  * looking for it.
  *
  * Four roles and two area states make eight actors. All eight are free: the predicate is

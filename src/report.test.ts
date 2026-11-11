@@ -4,7 +4,7 @@ import type { Measurement, Rule, Verdict } from './rule';
 
 const measurements: readonly Measurement[] = [{ size: 1, cost: 1 }];
 const rule: Rule = {
-    name: 'list-admin-users · SQL queries',
+    name: 'list-members · SQL queries',
     intention: 'The number of SQL queries does not grow with the input size',
     origin: 'default',
     measure: async () => measurements,
@@ -28,7 +28,7 @@ describe('report', () => {
     });
 
     test('names the rule concerned', () => {
-        expect(report([lacuna])).toContain('list-admin-users · SQL queries');
+        expect(report([lacuna])).toContain('list-members · SQL queries');
     });
 
     test('successes fit on a single line', () => {
@@ -63,7 +63,7 @@ describe('report', () => {
     test('a rule that measured nothing is named, not silenced', () => {
         const blind: Verdict = { ...held, measurements: [] };
 
-        expect(report([blind])).toContain('1 rule observed nothing: list-admin-users · SQL queries');
+        expect(report([blind])).toContain('1 rule observed nothing: list-members · SQL queries');
         expect(report([blind])).toContain('No input size was exercised');
     });
 

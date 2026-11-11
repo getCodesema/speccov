@@ -3,12 +3,12 @@ import { allOf } from './domain';
 
 type Actor = {
     readonly role: 'viewer' | 'org_admin' | 'platform_viewer' | 'platform_admin';
-    readonly adminAreaId: string | null;
+    readonly areaId: string | null;
 };
 
 const ACTORS: Parameters<typeof allOf<Actor>>[0] = {
     role: ['viewer', 'org_admin', 'platform_viewer', 'platform_admin'],
-    adminAreaId: ['area-north', null],
+    areaId: ['area-north', null],
 };
 
 describe('allOf', () => {
@@ -17,18 +17,18 @@ describe('allOf', () => {
     });
 
     test('the first case is the simplest: the first value of every field', () => {
-        expect(allOf<Actor>(ACTORS)[0]).toEqual({ role: 'viewer', adminAreaId: 'area-north' });
+        expect(allOf<Actor>(ACTORS)[0]).toEqual({ role: 'viewer', areaId: 'area-north' });
     });
 
     test('a case deviating on one field comes before a case deviating on two', () => {
         const built = allOf<Actor>(ACTORS);
-        const oneOff = built.findIndex((actor) => actor.role === 'org_admin' && actor.adminAreaId === 'area-north');
-        const twoOff = built.findIndex((actor) => actor.role === 'org_admin' && actor.adminAreaId === null);
+        const oneOff = built.findIndex((actor) => actor.role === 'org_admin' && actor.areaId === 'area-north');
+        const twoOff = built.findIndex((actor) => actor.role === 'org_admin' && actor.areaId === null);
         expect(oneOff).toBeLessThan(twoOff);
     });
 
     test('the scope defect is in the batch without anyone having written it', () => {
-        expect(allOf<Actor>(ACTORS)).toContainEqual({ role: 'org_admin', adminAreaId: null });
+        expect(allOf<Actor>(ACTORS)).toContainEqual({ role: 'org_admin', areaId: null });
     });
 
     test('a field with no value is a refusal, not an empty domain', () => {
