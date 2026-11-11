@@ -1,4 +1,5 @@
 import ts from 'typescript';
+import { reachesAsyncCall, returnsPromise } from './flow';
 
 export type ShapeKind =
     | 'unbounded-fanout'
@@ -70,7 +71,7 @@ export function findShapes(parsed: ts.SourceFile, checker: ts.TypeChecker, file:
         }
         if (isExported(node)) {
             for (const parameter of node.parameters) {
-                if (isBarePrimitive(parameter, checker)) {
+                if (isBarePrimitive(parameter, checker) && reachesAsyncCall(parameter, node.body, checker)) {
                     record('unbounded-primitive', parameter, parameter.name.getText(parsed));
                 }
             }
@@ -86,6 +87,9 @@ export function findShapes(parsed: ts.SourceFile, checker: ts.TypeChecker, file:
  * An exported function is a frontier: its arguments can come from anywhere, including code the
  * compiler never saw, such as a parsed body or a row read from a database. Inside the module
  * the caller is typed, so the guarantee holds and there is nothing left to ask.
+ *
+ * Necessary, not sufficient: `reachesAsyncCall` then keeps the parameters that go on to leave
+ * the process.
  */
 function isExported(node: ts.Node): node is ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction {
     if (ts.isFunctionDeclaration(node)) {
@@ -1132,13 +1136,4 @@ function isDecoration(call: ts.CallExpression, checker: ts.TypeChecker): boolean
         return false;
     }
     return checker.typeToString(checker.getTypeAtLocation(call.expression.expression)).startsWith('Promise<');
-}
-
-function returnsPromise(call: ts.CallExpression, checker: ts.TypeChecker): boolean {
-    const signature = checker.getResolvedSignature(call);
-    if (signature === undefined) {
-        return false;
-    }
-    const returned = checker.getReturnTypeOfSignature(signature);
-    return checker.typeToString(returned).startsWith('Promise<');
 }

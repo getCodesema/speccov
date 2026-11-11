@@ -715,97 +715,104 @@ describe('the four combinators', () => {
 
 describe('unbounded primitive', () => {
     test('an exported parameter typed `number` has no bound the type states', () => {
-        const found = moduleSitesOf('export function tarif(prix: number): void {}').map(({ kind }) => kind);
+        const found = moduleSitesOf('export function tarif(prix: number): void { void go([prix]); }').map(({ kind }) => kind);
         expect(found).toContain('unbounded-primitive');
     });
 
     test('a bare `string` counts the same', () => {
-        const found = moduleSitesOf('export function tarif(description: string): void {}').map(({ kind }) => kind);
+        const found = moduleSitesOf('export function tarif(description: string): void { void go([description]); }').map(
+            ({ kind }) => kind,
+        );
         expect(found).toContain('unbounded-primitive');
     });
 
     test('a literal union is closed by the compiler: no question', () => {
-        const found = moduleSitesOf("export function tarif(mode: 'TOTO' | 'TATA'): void {}").map(({ kind }) => kind);
+        const found = moduleSitesOf("export function tarif(mode: 'TOTO' | 'TATA'): void { void go([mode]); }").map(
+            ({ kind }) => kind,
+        );
         expect(found).not.toContain('unbounded-primitive');
     });
 
     test('a boolean is finite: no question', () => {
-        const found = moduleSitesOf('export function tarif(flagged: boolean): void {}').map(({ kind }) => kind);
+        const found = moduleSitesOf('export function tarif(flagged: boolean): void { void go([flagged]); }').map(
+            ({ kind }) => kind,
+        );
         expect(found).not.toContain('unbounded-primitive');
     });
 
     test('a function that is not exported is not a frontier', () => {
-        const found = moduleSitesOf('function tarif(prix: number): void {}').map(({ kind }) => kind);
+        const found = moduleSitesOf('function tarif(prix: number): void { void go([prix]); }').map(({ kind }) => kind);
         expect(found).not.toContain('unbounded-primitive');
     });
 
     test('an exported arrow counts as a frontier too', () => {
-        const found = moduleSitesOf('export const tarif = (prix: number): void => {};').map(({ kind }) => kind);
+        const found = moduleSitesOf('export const tarif = (prix: number): void => { void go([prix]); };').map(({ kind }) => kind);
         expect(found).toContain('unbounded-primitive');
     });
 
     test('two parameters on one line make two questions, not one', () => {
-        const found = moduleSitesOf('export function tarif(description: string, prix: number): void {}').filter(
-            ({ kind }) => kind === 'unbounded-primitive',
-        );
+        const found = moduleSitesOf(
+            'export function tarif(description: string, prix: number): void { void go([description, prix]); }',
+        ).filter(({ kind }) => kind === 'unbounded-primitive');
         expect(found).toHaveLength(2);
     });
 
     test('the excerpt names the parameter, so the question reads on its own', () => {
-        const site = moduleSitesOf('export function tarif(prix: number): void {}').find(
+        const site = moduleSitesOf('export function tarif(prix: number): void { void go([prix]); }').find(
             ({ kind }) => kind === 'unbounded-primitive',
         );
         expect(site?.excerpt).toBe('prix: number');
     });
 
     test('an optional parameter is left alone: the widened question is for a later pass', () => {
-        expect(primitivesOf('export function tarif(prix?: number): void {}')).toHaveLength(0);
+        expect(primitivesOf('export function tarif(prix?: number): void { void go([prix]); }')).toHaveLength(0);
     });
 
     test('a union of two primitives is left alone for the same reason', () => {
-        expect(primitivesOf('export function tarif(prix: number | string): void {}')).toHaveLength(0);
+        expect(primitivesOf('export function tarif(prix: number | string): void { void go([prix]); }')).toHaveLength(0);
     });
 
     test('a numeric literal type is closed by the compiler, like a literal union of strings', () => {
-        expect(primitivesOf('export function tarif(prix: 42): void {}')).toHaveLength(0);
+        expect(primitivesOf('export function tarif(prix: 42): void { void go([prix]); }')).toHaveLength(0);
     });
 
     test('a template literal type narrows the string: nothing left to ask', () => {
-        expect(primitivesOf('export function tarif(id: `u_${string}`): void {}')).toHaveLength(0);
+        expect(primitivesOf('export function tarif(id: `u_${string}`): void { void go([id]); }')).toHaveLength(0);
     });
 
     test('a bigint is not a number: the detector says what it checks, not what it resembles', () => {
-        expect(primitivesOf('export function tarif(prix: bigint): void {}')).toHaveLength(0);
+        expect(primitivesOf('export function tarif(prix: bigint): void { void go([prix]); }')).toHaveLength(0);
     });
 
     test('an alias closes nothing: `type Prix = number` still takes the whole domain', () => {
-        const found = primitivesOf('type Prix = number;\nexport function tarif(prix: Prix): void {}');
+        const found = primitivesOf('type Prix = number;\nexport function tarif(prix: Prix): void { void go([prix]); }');
         expect(found.map(({ excerpt }) => excerpt)).toEqual(['prix: Prix']);
     });
 
     test('a branded number is narrowed by its brand: no question', () => {
-        const source = 'type Prix = number & { readonly brand: unique symbol };\nexport function tarif(prix: Prix): void {}';
+        const source =
+            'type Prix = number & { readonly brand: unique symbol };\nexport function tarif(prix: Prix): void { void go([prix]); }';
         expect(primitivesOf(source)).toHaveLength(0);
     });
 
     test('a parameter with no annotation is not read, however obvious its default', () => {
-        expect(primitivesOf('export function tarif(prix = 3): void {}')).toHaveLength(0);
+        expect(primitivesOf('export function tarif(prix = 3): void { void go([prix]); }')).toHaveLength(0);
     });
 
     test('a rest parameter carries an array, not a bare primitive', () => {
-        expect(primitivesOf('export function tarif(...prix: number[]): void {}')).toHaveLength(0);
+        expect(primitivesOf('export function tarif(...prix: number[]): void { void go([prix]); }')).toHaveLength(0);
     });
 
     test('a destructured parameter carries an object, not a bare primitive', () => {
-        expect(primitivesOf('export function tarif({ prix }: { prix: number }): void {}')).toHaveLength(0);
+        expect(primitivesOf('export function tarif({ prix }: { prix: number }): void { void go([prix]); }')).toHaveLength(0);
     });
 
     test('`export default` is a frontier too', () => {
-        expect(primitivesOf('export default function tarif(prix: number): void {}')).toHaveLength(1);
+        expect(primitivesOf('export default function tarif(prix: number): void { void go([prix]); }')).toHaveLength(1);
     });
 
     test('an exported function expression is a frontier, like the arrow', () => {
-        expect(primitivesOf('export const tarif = function (prix: number): void {};')).toHaveLength(1);
+        expect(primitivesOf('export const tarif = function (prix: number): void { void go([prix]); };')).toHaveLength(1);
     });
 
     /**
@@ -814,23 +821,59 @@ describe('unbounded primitive', () => {
      * the class and the export list, which this pass does not do yet.
      */
     test('a method of an exported class is not seen: the pass reads functions, not members', () => {
-        expect(primitivesOf('export class Tarifs { apply(prix: number): void {} }')).toHaveLength(0);
+        expect(primitivesOf('export class Tarifs { apply(prix: number): void { void go([prix]); } }')).toHaveLength(0);
     });
 
     test('a function exported by a separate `export { }` is not seen either', () => {
-        expect(primitivesOf('function tarif(prix: number): void {}\nexport { tarif };')).toHaveLength(0);
+        expect(primitivesOf('function tarif(prix: number): void { void go([prix]); }\nexport { tarif };')).toHaveLength(0);
     });
 
     test('only the exported function is a frontier: an arrow it returns is not', () => {
-        const found = primitivesOf('export const tarif = (prix: number) => (remise: number): void => {};');
+        const found = primitivesOf(
+            'export const tarif = (prix: number) => (remise: number): void => { void go([prix, remise]); };',
+        );
         expect(found.map(({ excerpt }) => excerpt)).toEqual(['prix: number']);
     });
 
     test('two parameters on two lines make two questions, each at its own line', () => {
-        const found = primitivesOf('export function tarif(\n    description: string,\n    prix: number,\n): void {}');
+        const found = primitivesOf(
+            'export function tarif(\n    description: string,\n    prix: number,\n): void { void go([description, prix]); }',
+        );
         const lines = found.map(({ line }) => line);
         expect(found).toHaveLength(2);
         // The question is addressed to the parameter, so it points at the parameter's line.
         expect(lines[1]).toBe((lines[0] ?? 0) + 1);
+    });
+
+    /**
+     * "Exported" alone asked the question of every signature in a codebase of ES modules. What
+     * is left is the parameter that goes on to leave the process, read one hop away.
+     */
+    test('a parameter that only feeds a computation stays where the types hold: no question', () => {
+        expect(primitivesOf('export function tarif(prix: number): number { return prix * 2; }')).toHaveLength(0);
+    });
+
+    test('a synchronous call is not a way out', () => {
+        expect(primitivesOf('export function tarif(prix: number): number { return helpers.countRows(prix); }')).toHaveLength(0);
+    });
+
+    test('a parameter carried by an object still leaves with it', () => {
+        const found = primitivesOf('export async function tarif(id: string): Promise<void> { await repo.findById({ id }); }');
+        expect(found.map(({ excerpt }) => excerpt)).toEqual(['id: string']);
+    });
+
+    test('of two parameters, only the one that leaves is asked about', () => {
+        const found = primitivesOf('export function tarif(description: string, prix: number): void { void go(prix); }');
+        expect(found.map(({ excerpt }) => excerpt)).toEqual(['prix: number']);
+    });
+
+    test('one hop and no more: a copy of the parameter is not followed', () => {
+        const source =
+            'export async function tarif(prix: number): Promise<void> {\n    const copy = prix;\n    await go(copy);\n}';
+        expect(primitivesOf(source)).toHaveLength(0);
+    });
+
+    test('a declaration has no body to read: the question stays', () => {
+        expect(primitivesOf('export declare function tarif(prix: number): Promise<void>;')).toHaveLength(1);
     });
 });

@@ -211,6 +211,15 @@ by omission. That is the reproach made to a 90% coverage.
 | `for (const x of xs) { await go(x) }`                  | `complexity()` — should the wait grow with the list?      |
 | `Promise.all([...inflight.values()])`                  | **none** — a drain: that work was started elsewhere       |
 | `import { KEYS }` then `KEYS.map(…)`                   | **none** — the width is written, one file over            |
+| `export function f(id: string) { await load(id) }`     | `forbidden()`: what bounds that `string`?                 |
+| `export function f(id: string) { return id.trim() }`   | **none**: the value never leaves the process              |
+
+The last question bears on a type, not on a behaviour, and a codebase holds many more
+signatures than fan-outs. Two things keep it from burying the rest. It is only asked of a
+parameter that goes on to an asynchronous call, read one hop away: a value that merely
+feeds a computation stays where the types still hold. And the report gives it a block of
+its own, `Typed, not bounded`, with a total and the files where it concentrates. The JSON
+still carries every site.
 
 ### The shape it used to be blind to
 

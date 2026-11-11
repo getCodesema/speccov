@@ -1,4 +1,4 @@
-import { loadOrder, type Order } from './gateway';
+import { chargeOrder, loadOrder, type Order } from './gateway';
 
 /**
  * The frontier of the module: what comes in here was typed by no compiler. Below it, the
@@ -10,9 +10,16 @@ export async function byPage(page: number): Promise<readonly Order[]> {
     return [await loadOrder(String(page))];
 }
 
-// @expect unbounded-primitive, unbounded-primitive
+// Both values only feed a computation: neither leaves the process, so nothing is asked.
+// @expect none
 export function label(reference: string, quantity: number): string {
     return `${reference} x${quantity}`;
+}
+
+// The same two values, handed to a call that leaves the process: two questions.
+// @expect unbounded-primitive, unbounded-primitive
+export async function charge(reference: string, quantity: number): Promise<void> {
+    await chargeOrder(reference, quantity);
 }
 
 /** A closed union: the compiler already answered. */
