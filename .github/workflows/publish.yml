@@ -1,0 +1,51 @@
+name: Publish to npm
+
+on:
+    push:
+        tags:
+            - 'v*'
+
+permissions:
+    id-token: write
+    contents: read
+
+jobs:
+    publish:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v5
+
+            - uses: oven-sh/setup-bun@v2
+
+            - uses: actions/setup-node@v5
+              with:
+                  node-version: 24
+                  registry-url: https://registry.npmjs.org
+
+            # Trusted publishing (OIDC) requires npm >= 11.5.1
+            - run: npm install -g npm@latest
+
+            - run: bun install --frozen-lockfile
+
+            - run: bun run verify
+
+            # The tag and the manifest must agree: v0.2.0 publishes 0.2.0 and nothing else.
+            - run: test "$(jq -r .version package.json)" = "${GITHUB_REF_NAME#v}"
+
+            - name: Publish the package
+              # Empty once the package trusts this workflow (OIDC). Set the NPM_TOKEN secret only to publish
+              # a package that does not exist yet: npm cannot trust a workflow for a package it has never seen.
+              env:
+                  NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+              run: |
+                  VERSION="${GITHUB_REF_NAME#v}"
+                  case "$VERSION" in
+                    *-beta*|*-rc*|*-alpha*) DIST_TAG=next ;;
+                    *) DIST_TAG=latest ;;
+                  esac
+                  PUBLISHED="$(npm view "@codesema/speccov@$VERSION" version 2>/dev/null || echo none)"
+                  if [ "$VERSION" = "$PUBLISHED" ]; then
+                    echo "@codesema/speccov@$VERSION already published, skipping"
+                    exit 0
+                  fi
+                  npm publish --access public --tag "$DIST_TAG"
