@@ -1,0 +1,75 @@
+{
+    "version": 1,
+    "sites": [
+        {
+            "file": "answers.ts",
+            "kind": "unbounded-primitive",
+            "shape": "path: string",
+            "at": "2026-11-11",
+            "why": "a filesystem path: the file system is what validates it"
+        },
+        {
+            "file": "cli.ts",
+            "kind": "awaited-in-loop",
+            "shape": "for (const { file, line, path, todos, content } of drafted) { const deci…",
+            "at": "2026-11-11",
+            "why": "writes the drafts and prints them in order"
+        },
+        {
+            "file": "draft/index.ts",
+            "kind": "unbounded-primitive",
+            "shape": "file: string",
+            "at": "2026-11-11",
+            "why": "a filesystem path: the file system is what validates it"
+        },
+        {
+            "file": "draft/sweep.ts",
+            "kind": "awaited-in-loop",
+            "shape": "for (const site of sites) { if (!DRAFTABLE.has(site.kind)) { continue; }…",
+            "at": "2026-11-11",
+            "why": "local file reads, one draft per site"
+        },
+        {
+            "file": "draft/sweep.ts",
+            "kind": "unbounded-primitive",
+            "shape": "root: string",
+            "at": "2026-11-11",
+            "why": "a filesystem path: the file system is what validates it"
+        },
+        {
+            "file": "mutate/run.ts",
+            "kind": "awaited-in-loop",
+            "shape": "for (const [index, mutant] of budgeted.entries()) { options.onProgress?.…",
+            "at": "2026-11-11",
+            "why": "mutates the source in place and re-runs the tests: must stay serial"
+        },
+        {
+            "file": "mutate/run.ts",
+            "kind": "awaited-in-loop",
+            "shape": "for (const file of files) { mutants.push(...findMutants(file, await read…",
+            "at": "2026-11-11",
+            "why": "local file reads, negligible next to the mutation run"
+        },
+        {
+            "file": "run.ts",
+            "kind": "awaited-in-loop",
+            "shape": "for (const rule of rules) { const measurements = await rule.measure(); c…",
+            "at": "2026-11-11",
+            "why": "rules are measured one at a time: running them together would skew the measurements"
+        },
+        {
+            "file": "scan/answers.ts",
+            "kind": "unbounded-primitive",
+            "shape": "path: string",
+            "at": "2026-11-11",
+            "why": "a filesystem path: the file system is what validates it"
+        },
+        {
+            "file": "scan/index.ts",
+            "kind": "unbounded-primitive",
+            "shape": "root: string",
+            "at": "2026-11-11",
+            "why": "a filesystem path: the file system is what validates it"
+        }
+    ]
+}
