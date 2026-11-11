@@ -506,6 +506,7 @@ on the same scope: **25 mutants, 25 killed, no survivor.**
 | 2026-08-22 | TypeScript / Bun, not Rust                                 | The core has to **execute user TypeScript** (predicates, arbitraries) |
 | 2026-08-22 | One language, TS                                           | Premature multi-language has killed a hundred quality tools           |
 | 2026-08-22 | No dedicated domain name                                   | No value until there is a standalone product                          |
+| 2026-11-11 | Runs on Node as well as on Bun                             | A TypeScript project already has Node: `npx` is enough                |
 
 ## Measured on five real repositories
 

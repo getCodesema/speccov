@@ -17,6 +17,11 @@ jobs:
 
             - uses: oven-sh/setup-bun@v2
 
+            # The oldest Node the package declares: the suite runs the launcher on it.
+            - uses: actions/setup-node@v5
+              with:
+                  node-version: 22.15.0
+
             - run: bun install --frozen-lockfile
 
             - run: bun run lint

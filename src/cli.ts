@@ -1,4 +1,7 @@
 #!/usr/bin/env bun
+import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { accept, applyAnswers, DEFAULT_ANSWERS_PATH, loadAnswers, saveAnswers, type Answer } from './answers';
@@ -125,7 +128,7 @@ async function emitDraft(result: DraftResult, argv: readonly string[]): Promise<
     }
     const { path, content, todos } = result.draft;
     if (argv.includes('--write')) {
-        await Bun.write(path, content);
+        await writeFile(path, content, 'utf8');
         console.log(`\n  Draft written: ${path}`);
     } else {
         console.log(content);
@@ -149,7 +152,7 @@ async function runMutate(argv: readonly string[]): Promise<number> {
     if (!Number.isInteger(limit) || limit < 1) {
         throw new Error('speccov: --limit expects an integer of 1 or more.');
     }
-    await assertCleanTree(root);
+    assertCleanTree(root);
 
     const files = await collectSources(resolve(root));
     const result = await mutate({
@@ -175,15 +178,19 @@ async function runMutate(argv: readonly string[]): Promise<number> {
  * but a clean repository is the last-resort net: `git checkout` must always be able to
  * catch everything.
  */
-async function assertCleanTree(root: string): Promise<void> {
-    const child = Bun.spawn(['git', 'status', '--porcelain', '--', root], { stdout: 'pipe', stderr: 'ignore' });
-    const dirty = (await new Response(child.stdout).text()).trim();
-    if ((await child.exited) !== 0) {
+function assertCleanTree(root: string): void {
+    const { status, stdout } = spawnSync('git', ['status', '--porcelain', '--', root], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        maxBuffer: Infinity,
+    });
+    // Checked first: without git there is no status, and no output to read either.
+    if (status !== 0) {
         throw new Error(
             `speccov: ${root} is not inside a git repository. Mutation writes into your files: it refuses without a net.`,
         );
     }
-    if (dirty !== '') {
+    if (stdout.trim() !== '') {
         throw new Error(`speccov: ${root} has uncommitted changes. Commit or stash them before mutating.`);
     }
 }
@@ -287,11 +294,11 @@ async function reportSweep(root: string, sites: readonly Site[], write: boolean)
             console.log(`     ${file}:${line} → ${path}  (${decisions})`);
             continue;
         }
-        if (await Bun.file(path).exists()) {
+        if (existsSync(path)) {
             console.log(`     ${file}:${line} → ${path}  already exists, left untouched`);
             continue;
         }
-        await Bun.write(path, content);
+        await writeFile(path, content, 'utf8');
         console.log(`     ${file}:${line} → ${path}  written (${decisions})`);
     }
 
