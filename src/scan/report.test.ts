@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { Guarantee } from './guarantees';
 import { reportScan, type ScanResult } from './report';
+import type { Site } from './shapes';
 
 const FLAG: Guarantee = { flag: 'strictNullChecks', proves: 'no value is implicitly nullable', enabled: true };
 
@@ -58,6 +59,21 @@ describe('reportScan', () => {
 
     test('declares the deliberately excluded tests too', () => {
         expect(reportScan(result({ testsExcluded: 412 }))).toContain('412 test file(s) deliberately excluded');
+    });
+
+    test('the parameters without a bound get a block of their own, ranked by file', () => {
+        const site = (file: string, line: number): Site => ({ kind: 'unbounded-primitive', file, line, excerpt: 'id: string' });
+        const rendered = reportScan(result({ sites: [site('a.ts', 1), site('b.ts', 1), site('b.ts', 2)] }));
+
+        expect(rendered).toContain('── Typed, not bounded');
+        expect(rendered).toContain('3 parameter(s) in 2 file(s) → forbidden()');
+        expect(rendered.indexOf('b.ts  2')).toBeLessThan(rendered.indexOf('a.ts  1'));
+        // A total and where it concentrates, not one line per signature.
+        expect(rendered).not.toContain('a.ts:1');
+    });
+
+    test('a scan with no such parameter has no such block', () => {
+        expect(reportScan(result())).not.toContain('Typed, not bounded');
     });
 
     test('declares what the project set aside, sites included', () => {

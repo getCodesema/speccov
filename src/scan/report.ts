@@ -25,7 +25,15 @@ export type ScanResult = {
     readonly refused: readonly { readonly path: string; readonly reason: string }[];
 };
 
-const CANDIDATES: readonly { kind: ShapeKind; rule: string; question: string }[] = [
+type Candidate = { readonly kind: ShapeKind; readonly rule: string; readonly question: string };
+
+const UNBOUNDED_PRIMITIVE: Candidate = {
+    kind: 'unbounded-primitive',
+    rule: 'forbidden()',
+    question: 'this parameter takes the whole primitive domain (empty string, NaN, negative, unbounded): what is the limit?',
+};
+
+const CANDIDATES: readonly Candidate[] = [
     {
         kind: 'unbounded-fanout',
         rule: 'resource()',
@@ -46,11 +54,7 @@ const CANDIDATES: readonly { kind: ShapeKind; rule: string; question: string }[]
         rule: 'metamorphic()',
         question: 'should `total` stay the same whatever the page?',
     },
-    {
-        kind: 'unbounded-primitive',
-        rule: 'forbidden()',
-        question: 'this parameter takes the whole primitive domain (empty string, NaN, negative, unbounded): what is the limit?',
-    },
+    UNBOUNDED_PRIMITIVE,
 ];
 
 const MAX_SITES_SHOWN = 6;
@@ -141,7 +145,7 @@ export function reportScan(result: ScanResult, accepted: readonly Site[] = []): 
     lines.push(...partial);
     for (const { kind, rule, question } of CANDIDATES) {
         const sites = result.sites.filter((site) => site.kind === kind);
-        if (sites.length === 0) {
+        if (sites.length === 0 || kind === UNBOUNDED_PRIMITIVE.kind) {
             continue;
         }
         lines.push('', `     ⚠ ${sites.length} site(s) → ${rule}: ${question}`);
@@ -159,6 +163,8 @@ export function reportScan(result: ScanResult, accepted: readonly Site[] = []): 
         const plural = accepted.length > 1 ? 's' : '';
         lines.push('', `     · ${accepted.length} site${plural} already answered (see the scan answers file)`);
     }
+
+    lines.push(...typedNotBounded(result.sites));
 
     lines.push('', '  ── Not measured ───────────────────────────────────────────');
     lines.push('     This pass is static: no behaviour was observed.');
@@ -214,6 +220,39 @@ export function reportScan(result: ScanResult, accepted: readonly Site[] = []): 
     }
     lines.push('');
     return lines.join('\n');
+}
+
+/**
+ * The parameters whose type states no bound, in a block of their own.
+ *
+ * The other candidates describe a behaviour: calls that grow with a collection. This one
+ * describes a type, and there are many more of them: listed alongside, a few hundred
+ * signatures bury the handful of fan-outs. So the block gives the size of the question and
+ * where it concentrates, file by file. Nothing is dropped: every site is in the JSON.
+ */
+function typedNotBounded(sites: readonly Site[]): readonly string[] {
+    const perFile = new Map<string, number>();
+    for (const { kind, file } of sites) {
+        if (kind === UNBOUNDED_PRIMITIVE.kind) {
+            perFile.set(file, (perFile.get(file) ?? 0) + 1);
+        }
+    }
+    if (perFile.size === 0) {
+        return [];
+    }
+    const total = [...perFile.values()].reduce((sum, count) => sum + count, 0);
+    const ranked = [...perFile].sort(([left, a], [right, b]) => b - a || left.localeCompare(right));
+    const lines = [
+        '',
+        '  ── Typed, not bounded ─────────────────────────────────────',
+        `     ⚠ ${total} parameter(s) in ${perFile.size} file(s) → ${UNBOUNDED_PRIMITIVE.rule}: ${UNBOUNDED_PRIMITIVE.question}`,
+        ...ranked.slice(0, MAX_SITES_SHOWN).map(([file, count]) => `         ${file}  ${count}`),
+    ];
+    if (ranked.length > MAX_SITES_SHOWN) {
+        lines.push(`         … and ${ranked.length - MAX_SITES_SHOWN} more file(s)`);
+    }
+    lines.push('     A property of the type, not an observed behaviour. Every site is in the --json output.');
+    return lines;
 }
 
 /**
