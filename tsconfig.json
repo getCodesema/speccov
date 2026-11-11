@@ -1,0 +1,28 @@
+{
+    "compilerOptions": {
+        "target": "ES2023",
+        "module": "Preserve",
+        "moduleResolution": "bundler",
+        "lib": ["ES2023"],
+        "types": ["bun"],
+        "strict": true,
+        "noUncheckedIndexedAccess": true,
+        "exactOptionalPropertyTypes": true,
+        "noImplicitOverride": true,
+        "noFallthroughCasesInSwitch": true,
+        "noUnusedLocals": true,
+        "noUnusedParameters": true,
+        "noImplicitReturns": true,
+        "noUncheckedSideEffectImports": true,
+        "allowUnreachableCode": false,
+        "allowUnusedLabels": false,
+        "erasableSyntaxOnly": true,
+        "verbatimModuleSyntax": true,
+        "noEmit": true,
+        "skipLibCheck": true
+    },
+    // The corpus under `fixtures/corpus` is compiled by its own tsconfig, the one the scan
+    // reads. Checking it a second time here would only give it a second, stricter opinion.
+    "include": ["src", "examples", "fixtures"],
+    "exclude": ["fixtures/corpus"]
+}

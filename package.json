@@ -1,0 +1,64 @@
+{
+    "name": "@codesema/speccov",
+    "version": "0.1.0",
+    "description": "Finds the behaviours no rule guarantees, and puts them as questions.",
+    "type": "module",
+    "license": "MIT",
+    "author": "Hasan TASKIN",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/getCodesema/speccov.git"
+    },
+    "keywords": [
+        "ast",
+        "codesema",
+        "hardening",
+        "n-plus-one",
+        "property-based-testing",
+        "static-analysis",
+        "typescript"
+    ],
+    "engines": {
+        "node": ">=22.15.0",
+        "bun": ">=1.3.0"
+    },
+    "publishConfig": {
+        "access": "public"
+    },
+    "bin": {
+        "speccov": "./bin/speccov.mjs"
+    },
+    "exports": {
+        ".": "./src/index.ts",
+        "./typeorm": "./src/adapters/typeorm.ts"
+    },
+    "files": [
+        "bin",
+        "src",
+        "!src/**/*.test.ts",
+        "!src/scan/virtual-program.ts"
+    ],
+    "scripts": {
+        "prepare": "lefthook install || echo \"WARNING: lefthook install failed — git hooks are NOT active (no secret scan, no format or lint on commit). Run `bun run prepare` again once git and lefthook are available.\"",
+        "test": "bun test",
+        "typecheck": "tsc --noEmit",
+        "lint": "oxlint",
+        "format": "prettier --write . --cache",
+        "format:check": "prettier --check . --cache",
+        "verify": "bun run typecheck && bun run lint && bun test"
+    },
+    "dependencies": {
+        "typescript": "^6.0.3"
+    },
+    "devDependencies": {
+        "@commitlint/cli": "^21.2.3",
+        "@commitlint/config-conventional": "^21.2.3",
+        "@types/bun": "latest",
+        "better-sqlite3": "^13.0.3",
+        "lefthook": "^2.2.2",
+        "oxlint": "^1.88.0",
+        "pg": "^8.23.1",
+        "prettier": "^3.9.10",
+        "typeorm": "^1.1.2"
+    }
+}
