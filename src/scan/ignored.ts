@@ -1,3 +1,5 @@
+import { spawnSync } from 'node:child_process';
+
 /**
  * Filters out the paths the repository itself sets aside.
  *
@@ -13,25 +15,26 @@ export async function dropIgnored(root: string, paths: readonly string[]): Promi
     if (paths.length === 0) {
         return paths;
     }
-    const ignored = await askGit(root, paths);
+    const ignored = askGit(root, paths);
     return ignored === undefined ? paths : paths.filter((path) => !ignored.has(path));
 }
 
 const NUL = '\0';
 
-async function askGit(root: string, paths: readonly string[]): Promise<Set<string> | undefined> {
-    const child = Bun.spawn(['git', '-C', root, 'check-ignore', '--stdin', '-z'], {
-        stdin: new TextEncoder().encode(paths.join(NUL) + NUL),
-        stdout: 'pipe',
-        stderr: 'ignore',
+function askGit(root: string, paths: readonly string[]): Set<string> | undefined {
+    const { status, stdout } = spawnSync('git', ['-C', root, 'check-ignore', '--stdin', '-z'], {
+        input: paths.join(NUL) + NUL,
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'ignore'],
+        // The answer grows with the repository: the default megabyte would cut it short.
+        maxBuffer: Infinity,
     });
-    const answer = await new Response(child.stdout).text();
-    const code = await child.exited;
 
-    // 0: at least one path ignored. 1: none. Everything else (128 outside a repository) is
-    // a refusal to answer, and a refusal to answer must not read as "nothing is ignored".
-    if (code !== 0 && code !== 1) {
+    // 0: at least one path ignored. 1: none. Everything else (128 outside a repository, no
+    // status at all without git) is a refusal to answer, and a refusal to answer must not
+    // read as "nothing is ignored".
+    if (status !== 0 && status !== 1) {
         return undefined;
     }
-    return new Set(answer.split(NUL).filter((line) => line !== ''));
+    return new Set(stdout.split(NUL).filter((line) => line !== ''));
 }

@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import { applyMutant, findMutants, type Mutant } from './mutators';
 
@@ -64,7 +65,15 @@ async function tryMutant(mutant: Mutant, options: MutateOptions): Promise<Fate> 
     }
 }
 
-async function run({ command, cwd }: MutateOptions): Promise<number> {
-    const child = Bun.spawn([...command], { cwd, stdout: 'ignore', stderr: 'ignore' });
-    return child.exited;
+function run({ command, cwd }: MutateOptions): Promise<number> {
+    const [program, ...args] = command;
+    if (program === undefined) {
+        throw new Error('speccov: the command that judges a mutant is empty.');
+    }
+    return new Promise((settle, reject) => {
+        const child = spawn(program, args, { cwd, stdio: 'ignore' });
+        child.once('error', reject);
+        // No exit code means a signal ended the command: it did not pass, the mutant is killed.
+        child.once('exit', (code) => settle(code ?? 1));
+    });
 }
