@@ -52,3 +52,11 @@ test('Node runs a rules file written in the TypeScript Node cannot load by itsel
     expect(child.stderr.toString()).toBe('');
     expect(child.exitCode).toBe(0);
 });
+
+test('the bin path is written the way npm keeps it', async () => {
+    // At publish time npm drops a bin whose path starts with "./", behind a warning: the
+    // package then installs without its command.
+    const manifest = (await Bun.file(resolve(import.meta.dir, '../package.json')).json()) as { bin: Record<string, string> };
+
+    expect(Object.values(manifest.bin).filter((path) => path.startsWith('./'))).toEqual([]);
+});

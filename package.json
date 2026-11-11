@@ -1,6 +1,6 @@
 {
     "name": "@codesema/speccov",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "description": "Finds the behaviours no rule guarantees, and puts them as questions.",
     "type": "module",
     "license": "MIT",
@@ -26,7 +26,7 @@
         "access": "public"
     },
     "bin": {
-        "speccov": "./bin/speccov.mjs"
+        "speccov": "bin/speccov.mjs"
     },
     "exports": {
         ".": "./src/index.ts",
